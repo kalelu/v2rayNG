@@ -28,8 +28,8 @@ android {
         applicationId = "com.kalelu.japanproxy"
         minSdk = 24
         targetSdk = 37
-        versionCode = 10000
-        versionName = "1.0.0"
+        versionCode = 10001
+        versionName = "1.0.1"
 
         splits {
             abi {

@@ -326,7 +326,7 @@
         <activity
             android:name=".ui.shortcut.TaskerActivity"
             android:exported="true"
-            android:icon="@mipmap/ic_launcher">
+            android:icon="@mipmap/ic_japan_proxy">
             <intent-filter>
                 <action android:name="com.twofortyfouram.locale.intent.action.EDIT_SETTING" />
             </intent-filter>
