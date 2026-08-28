@@ -317,6 +317,13 @@ object AngConfigManager {
         append: Boolean,
         expectedSubscriptionUrl: String? = null,
     ): ProfileCommitResult {
+        val matchingConfigs = configs.filter { parsed ->
+            JapanNodeFilter.accepts(parsed.profile.remarks)
+        }
+        if (!JapanNodeFilter.shouldCommit(matchingConfigs.size, expectedSubscriptionUrl)) {
+            return ProfileCommitResult()
+        }
+
         val currentSubscriptionUrl = MmkvManager.decodeSubscription(subid)
             ?.url
             ?.takeIf { it.isNotBlank() }
@@ -326,7 +333,7 @@ object AngConfigManager {
         } else {
             emptySet()
         }
-        val acceptedConfigs = configs.filterNot { parsed ->
+        val acceptedConfigs = matchingConfigs.filterNot { parsed ->
             ProfileReplacement.stableIdentity(parsed.profile, parsed.rawConfig) in excludedIdentities
         }
         val reusableGuids = if (append) {

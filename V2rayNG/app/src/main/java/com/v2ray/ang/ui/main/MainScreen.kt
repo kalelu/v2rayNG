@@ -201,25 +201,9 @@ private fun DashboardPage(
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 20.dp, top = 24.dp, end = 20.dp, bottom = 28.dp),
+        contentPadding = PaddingValues(start = 20.dp, top = 18.dp, end = 20.dp, bottom = 28.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        item {
-            PageHeader(
-                eyebrow = "NI DU · 轻代理",
-                title = "首页",
-                supportingText = if (uiState.isRunning) "连接稳定，代理正在工作" else "一键开启你的专属连接",
-                palette = palette,
-                trailing = {
-                    StatusPill(
-                        active = uiState.isRunning,
-                        palette = palette,
-                        label = if (uiState.isRunning) "已连接" else "未连接",
-                    )
-                },
-            )
-        }
-
         item {
             ProxyHeroCard(
                 uiState = uiState,
@@ -1167,7 +1151,7 @@ private fun EmptyNodesCard(
         )
         Spacer(Modifier.height(6.dp))
         Text(
-            text = "可粘贴分享链接导入，或更新已有订阅",
+            text = "导入后仅保留名称含“日本”或“东京”的节点",
             color = palette.textMuted,
             style = MaterialTheme.typography.bodySmall,
         )
@@ -1210,36 +1194,6 @@ private fun PageHeader(
         }
         Spacer(Modifier.width(12.dp))
         trailing()
-    }
-}
-
-@Composable
-private fun StatusPill(
-    active: Boolean,
-    palette: LitePalette,
-    label: String,
-) {
-    val color = if (active) palette.success else palette.textMuted
-    Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(14.dp))
-            .background(color.copy(alpha = 0.11f))
-            .padding(horizontal = 11.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(7.dp)
-                .clip(CircleShape)
-                .background(color),
-        )
-        Spacer(Modifier.width(7.dp))
-        Text(
-            text = label,
-            color = color,
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.Bold,
-        )
     }
 }
 
