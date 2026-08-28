@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.res.AssetManager
 import android.os.Build
 import android.text.TextUtils
+import com.v2ray.ang.AngApplication
 import com.v2ray.ang.AppConfig
 import com.v2ray.ang.AppConfig.ANG_PACKAGE
 import com.v2ray.ang.AppConfig.DEFAULT_SUBSCRIPTION_ID
@@ -12,6 +13,7 @@ import com.v2ray.ang.AppConfig.GEOSITE_PRIVATE
 import com.v2ray.ang.AppConfig.TAG_DIRECT
 import com.v2ray.ang.AppConfig.VPN
 import com.v2ray.ang.dto.V2rayConfig
+import com.v2ray.ang.core.LauncherManager
 import com.v2ray.ang.dto.entities.ProfileItem
 import com.v2ray.ang.dto.entities.RulesetItem
 import com.v2ray.ang.dto.entities.SubscriptionItem
@@ -236,9 +238,15 @@ object SettingsManager {
      * it creates a new default subscription to ensure that ungroup
      **/
     fun removeSubscriptionWithDefault(subid: String) {
+        val selectedBeforeRemoval = MmkvManager.getSelectServer()
         SubscriptionUpdater.cancelOne(subId = subid)
         // Remove the subscription
         removeSubscription(subid)
+        LauncherManager.reconcileSelectionChange(
+            AngApplication.application,
+            selectedBeforeRemoval,
+            forceReload = true,
+        )
 
         // After removal, check if there are any subscriptions left. If not, create a default subscription.
         val subsList2 = decodeSubsList()

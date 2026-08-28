@@ -15,7 +15,8 @@ object V2rayNFmt : FmtBase() {
             val v2rayNShareItem = JsonUtil.fromJson(jsonPayload, V2rayNShareItem::class.java)
             return v2rayNShareItem?.toProfileItem()
         } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "Failed to parse V2rayN format", e)
+            // Parser exceptions can contain fragments of the decoded proxy credentials.
+            LogUtil.e(AppConfig.TAG, "Failed to parse V2rayN format: ${e.javaClass.simpleName}")
         }
         return null
     }

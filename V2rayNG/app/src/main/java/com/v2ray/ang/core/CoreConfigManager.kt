@@ -44,11 +44,11 @@ object CoreConfigManager {
             }
             return toConfigResult(configContext, buildUnifiedConfig(configContext))
         } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "Failed to get V2ray config", e)
+            LogUtil.e(AppConfig.TAG, "Failed to get V2ray config: ${e.javaClass.simpleName}")
             return ConfigResult(
                 status = false,
                 guid = guid,
-                errorMessage = "Failed to get V2ray config: ${e.message ?: e.javaClass.simpleName}"
+                errorMessage = "Failed to get V2ray config: ${e.javaClass.simpleName}"
             )
         }
     }
@@ -74,11 +74,14 @@ object CoreConfigManager {
 
             return toConfigResult(configContext, v2rayConfig)
         } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "Failed to get V2ray config for speedtest", e)
+            LogUtil.e(
+                AppConfig.TAG,
+                "Failed to get V2ray config for speedtest: ${e.javaClass.simpleName}",
+            )
             return ConfigResult(
                 status = false,
                 guid = guid,
-                errorMessage = "Failed to get V2ray config: ${e.message ?: e.javaClass.simpleName}"
+                errorMessage = "Failed to get V2ray config: ${e.javaClass.simpleName}"
             )
         }
     }
@@ -242,7 +245,7 @@ object CoreConfigManager {
         balancerStrategies: MutableList<BalancerStrategy>,
     ) {
         if (resolvedOutbound.tag in existingTags) {
-            LogUtil.w(AppConfig.TAG, "Resolved outbound tag '${resolvedOutbound.tag}' already exists, skipping duplicated entry")
+            LogUtil.w(AppConfig.TAG, "Resolved outbound tag already exists; skipping duplicate")
             return
         }
 
@@ -282,11 +285,11 @@ object CoreConfigManager {
         v2rayConfig: V2rayConfig,
     ) {
         val profile = resolvedOutbound.resolvedProfiles.firstOrNull() ?: run {
-            LogUtil.w(AppConfig.TAG, "NORMAL resolved outbound '${resolvedOutbound.tag}' has empty resolvedProfiles, skipping")
+            LogUtil.w(AppConfig.TAG, "NORMAL resolved outbound has no profiles; skipping")
             return
         }
         val outbound = convertProfile2Outbound(profile) ?: run {
-            LogUtil.w(AppConfig.TAG, "Could not convert NORMAL resolved outbound '${resolvedOutbound.tag}' profile to outbound, skipping")
+            LogUtil.w(AppConfig.TAG, "Could not convert NORMAL resolved outbound; skipping")
             return
         }
         outbound.tag = resolvedOutbound.tag
@@ -311,7 +314,7 @@ object CoreConfigManager {
             .mapNotNull { convertProfile2Outbound(it) }
             .toMutableList()
         if (chainOutbounds.isEmpty()) {
-            LogUtil.w(AppConfig.TAG, "PROXYCHAIN resolved outbound '${resolvedOutbound.tag}' has no valid profiles, skipping")
+            LogUtil.w(AppConfig.TAG, "PROXYCHAIN resolved outbound has no valid profiles; skipping")
             return
         }
         if (chainOutbounds.size == 1) {
@@ -336,7 +339,7 @@ object CoreConfigManager {
         if (chainTags.any { it in existingTags }) {
             LogUtil.w(
                 AppConfig.TAG,
-                "PROXYCHAIN resolved outbound '${resolvedOutbound.tag}' has colliding hop tags, skipping"
+                "PROXYCHAIN resolved outbound has colliding hop tags; skipping"
             )
             return
         }
@@ -371,7 +374,7 @@ object CoreConfigManager {
             convertProfile2Outbound(profile)?.let { ob -> ob to profile }
         }
         if (memberPairs.isEmpty()) {
-            LogUtil.w(AppConfig.TAG, "POLICYGROUP resolved outbound '${resolvedOutbound.tag}' has no valid member outbounds, skipping")
+            LogUtil.w(AppConfig.TAG, "POLICYGROUP resolved outbound has no valid members; skipping")
             return
         }
 
@@ -390,7 +393,7 @@ object CoreConfigManager {
         if (membersToAdd.isEmpty()) {
             LogUtil.w(
                 AppConfig.TAG,
-                "POLICYGROUP resolved outbound '${resolvedOutbound.tag}' produced no unique member tags, skipping"
+                "POLICYGROUP resolved outbound produced no unique member tags; skipping"
             )
             return
         }
@@ -1214,7 +1217,7 @@ object CoreConfigManager {
             && outboundTag !in AppConfig.BUILTIN_OUTBOUND_TAGS
             && v2rayConfig.outbounds.none { it.tag == outboundTag }
         ) {
-            LogUtil.w(AppConfig.TAG, "Outbound tag '$outboundTag' not found, falling back to '${AppConfig.TAG_PROXY}'")
+            LogUtil.w(AppConfig.TAG, "Outbound tag not found; falling back to default proxy")
             rule.outboundTag = AppConfig.TAG_PROXY
         }
 

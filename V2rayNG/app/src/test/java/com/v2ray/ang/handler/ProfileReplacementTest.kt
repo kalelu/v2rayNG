@@ -3,10 +3,87 @@ package com.v2ray.ang.handler
 import com.v2ray.ang.dto.entities.ProfileItem
 import com.v2ray.ang.enums.EConfigType
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
 class ProfileReplacementTest {
+
+    @Test
+    fun `stable identity ignores display and subscription metadata`() {
+        val original = profile(
+            remarks = "Tokyo A",
+            server = "jp.example.com",
+            port = "443",
+            password = "secret",
+        ).apply {
+            subscriptionId = "subscription-a"
+            addedTime = 1L
+        }
+        val refreshed = original.copy(
+            remarks = "Tokyo renamed",
+            subscriptionId = "subscription-b",
+            addedTime = 999L,
+        )
+
+        assertEquals(
+            ProfileReplacement.stableIdentity(original),
+            ProfileReplacement.stableIdentity(refreshed),
+        )
+    }
+
+    @Test
+    fun `stable identity changes with connection credentials`() {
+        val original = profile(server = "jp.example.com", port = "443", password = "secret")
+
+        assertNotEquals(
+            ProfileReplacement.stableIdentity(original),
+            ProfileReplacement.stableIdentity(original.copy(server = "other.example.com")),
+        )
+        assertNotEquals(
+            ProfileReplacement.stableIdentity(original),
+            ProfileReplacement.stableIdentity(original.copy(password = "rotated")),
+        )
+    }
+
+    @Test
+    fun `custom stable identity includes the raw connection payload`() {
+        val custom = profile(configType = EConfigType.CUSTOM)
+
+        assertNotEquals(
+            ProfileReplacement.stableIdentity(custom, "{\"password\":\"first\"}"),
+            ProfileReplacement.stableIdentity(custom, "{\"password\":\"second\"}"),
+        )
+    }
+
+    @Test
+    fun `structured stable identity ignores an unrelated raw payload`() {
+        val structured = profile(configType = EConfigType.VMESS, password = "secret")
+
+        assertEquals(
+            ProfileReplacement.stableIdentity(structured, "first"),
+            ProfileReplacement.stableIdentity(structured, "second"),
+        )
+    }
+
+    @Test
+    fun `custom stable identity ignores JSON formatting key order and remarks`() {
+        val custom = profile(configType = EConfigType.CUSTOM)
+        val first = """{"remarks":"Tokyo","outbounds":[{"port":443,"password":"secret"}]}"""
+        val second = """
+            {
+              "outbounds": [
+                { "password": "secret", "port": 443 }
+              ],
+              "remarks": "Renamed"
+            }
+        """.trimIndent()
+
+        assertEquals(
+            ProfileReplacement.stableIdentity(custom, first),
+            ProfileReplacement.stableIdentity(custom, second),
+        )
+    }
 
     @Test
     fun `prefers a full match over a remarks-only match`() {
@@ -127,11 +204,12 @@ class ProfileReplacementTest {
     }
 
     private fun profile(
+        configType: EConfigType = EConfigType.VMESS,
         remarks: String = "",
         server: String = "",
         port: String = "",
         password: String = "",
-    ) = ProfileItem.create(EConfigType.VMESS).apply {
+    ) = ProfileItem.create(configType).apply {
         this.remarks = remarks
         this.server = server
         this.serverPort = port

@@ -3,7 +3,16 @@ package com.v2ray.ang.ui
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
 import com.v2ray.ang.AppConfig
 import com.v2ray.ang.R
@@ -16,75 +25,72 @@ import com.v2ray.ang.util.LogUtil
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.net.URLDecoder
 
 class UrlSchemeActivity : BaseComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        try {
-            intent.apply {
-                if (action == Intent.ACTION_SEND) {
-                    if ("text/plain" == type) {
-                        intent.getStringExtra(Intent.EXTRA_TEXT)?.let {
-                            parseUri(it, null)
-                        }
-                    }
-                } else if (action == Intent.ACTION_VIEW) {
-                    when (data?.host) {
-                        "install-config" -> {
-                            val uri: Uri? = intent.data
-                            val shareUrl = uri?.getQueryParameter("url").orEmpty()
-                            parseUri(shareUrl, uri?.fragment)
-                        }
-
-                        "install-sub" -> {
-                            val uri: Uri? = intent.data
-                            val shareUrl = uri?.getQueryParameter("url").orEmpty()
-                            parseUri(shareUrl, uri?.fragment)
-                        }
-
-                        else -> {
-                            toastError(R.string.toast_failure)
-                        }
-                    }
-                }
+        lifecycleScope.launch {
+            val imported = try {
+                importFromIntent(intent)
+            } catch (error: Exception) {
+                // Imported links may contain subscription tokens or proxy credentials. Never
+                // attach the exception message or the input URI to logs.
+                LogUtil.e(AppConfig.TAG, "External import failed: ${error.javaClass.simpleName}")
+                false
             }
 
-            startActivity(Intent(this, MainActivity::class.java))
+            if (imported) {
+                toast(R.string.import_subscription_success)
+            } else {
+                toastError(R.string.import_subscription_failure)
+            }
+            startActivity(Intent(this@UrlSchemeActivity, MainActivity::class.java))
             finish()
-        } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "Error processing URL scheme", e)
         }
     }
 
     @Composable
     override fun ScreenContent() {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            CircularProgressIndicator()
+            Text(text = stringResource(R.string.msg_dialog_progress))
+        }
     }
 
-    private fun parseUri(uriString: String?, fragment: String?) {
-        if (uriString.isNullOrEmpty()) {
-            return
-        }
-        LogUtil.i(AppConfig.TAG, uriString)
+    private suspend fun importFromIntent(sourceIntent: Intent): Boolean {
+        val (uriString, fragment) = when (sourceIntent.action) {
+            Intent.ACTION_SEND -> {
+                if (sourceIntent.type != "text/plain") return false
+                sourceIntent.getStringExtra(Intent.EXTRA_TEXT) to null
+            }
 
-        var decodedUrl = URLDecoder.decode(uriString, "UTF-8")
-        val uri = Uri.parse(decodedUrl)
-        if (uri != null) {
-            if (uri.fragment.isNullOrEmpty() && !fragment.isNullOrEmpty()) {
-                decodedUrl += "#${fragment}"
-            }
-            LogUtil.i(AppConfig.TAG, decodedUrl)
-            lifecycleScope.launch(Dispatchers.IO) {
-                val (count, countSub) = AngConfigManager.importBatchConfig(decodedUrl, "", false)
-                withContext(Dispatchers.Main) {
-                    if (count + countSub > 0) {
-                        toast(R.string.import_subscription_success)
-                    } else {
-                        toast(R.string.import_subscription_failure)
-                    }
+            Intent.ACTION_VIEW -> {
+                val sourceUri = sourceIntent.data ?: return false
+                if (sourceUri.host != "install-config" && sourceUri.host != "install-sub") {
+                    return false
                 }
+                sourceUri.getQueryParameter("url") to sourceUri.fragment
             }
+
+            else -> return false
         }
+        if (uriString.isNullOrBlank()) return false
+
+        // ACTION_SEND text is not form-encoded, and getQueryParameter() already percent-decodes
+        // ACTION_VIEW values. Decoding either a second time corrupts valid '+' credentials.
+        var importedText = uriString
+        val parsedUri = Uri.parse(importedText)
+        if (parsedUri.fragment.isNullOrEmpty() && !fragment.isNullOrEmpty()) {
+            importedText += "#$fragment"
+        }
+        val (count, countSub) = withContext(Dispatchers.IO) {
+            AngConfigManager.importBatchConfig(importedText, "", false)
+        }
+        return count + countSub > 0
     }
 }

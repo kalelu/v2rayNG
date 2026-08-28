@@ -3,6 +3,7 @@ package com.v2ray.ang.ui.main
 import com.v2ray.ang.dto.ConnectionTestResult
 import com.v2ray.ang.dto.GroupMapItem
 import com.v2ray.ang.dto.LocateTarget
+import com.v2ray.ang.lite.LiteEnergySummary
 
 /** Locale-neutral state formatted only when it reaches the main UI. */
 sealed interface MainStatus {
@@ -26,7 +27,14 @@ data class MainUiState(
     val locateTarget: LocateTarget? = null,
     val confirmRemove: Boolean = false,
     val doubleColumnDisplay: Boolean = false,
-    val shareQRCodeBitmap: android.graphics.Bitmap? = null
+    val shareQRCodeBitmap: android.graphics.Bitmap? = null,
+    val selectedServerName: String = "",
+    val selectedServerDelayMillis: Long = 0L,
+    val candidateGuids: Set<String> = emptySet(),
+    val autoOptimizeEnabled: Boolean = true,
+    val isOptimizing: Boolean = false,
+    val optimizationMessage: String = "",
+    val energySummary: LiteEnergySummary = LiteEnergySummary(),
 )
 
 /**
@@ -46,6 +54,10 @@ sealed interface MainAction {
     data object SortByTestResults : MainAction
     data object UpdateSubscriptions : MainAction
     data object ExportAll : MainAction
+    data object OptimizeCandidates : MainAction
+    data object RefreshLiteDashboard : MainAction
+    data class ToggleCandidate(val guid: String) : MainAction
+    data class SetAutoOptimize(val enabled: Boolean) : MainAction
 
     data object ImportQRcode : MainAction
     data object ImportClipboard : MainAction

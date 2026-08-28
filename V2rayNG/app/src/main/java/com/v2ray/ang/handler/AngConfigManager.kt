@@ -3,8 +3,10 @@ package com.v2ray.ang.handler
 import android.content.Context
 import android.graphics.Bitmap
 import android.text.TextUtils
+import com.v2ray.ang.AngApplication
 import com.v2ray.ang.AppConfig
 import com.v2ray.ang.core.CoreConfigManager
+import com.v2ray.ang.core.LauncherManager
 import com.v2ray.ang.dto.SubscriptionUpdateResult
 import com.v2ray.ang.dto.UrlContentRequest
 import com.v2ray.ang.dto.entities.ProfileItem
@@ -34,6 +36,20 @@ object AngConfigManager {
         val profile: ProfileItem,
         val rawConfig: String? = null,
     )
+
+    private enum class ProfileCommitState {
+        NO_VALID_PROFILES,
+        STALE_SUBSCRIPTION,
+        APPLIED,
+    }
+
+    private data class ProfileCommitResult(
+        val configCount: Int = 0,
+        val state: ProfileCommitState = ProfileCommitState.NO_VALID_PROFILES,
+    ) {
+        val applied: Boolean get() = state == ProfileCommitState.APPLIED
+        val shouldTryNextParser: Boolean get() = state == ProfileCommitState.NO_VALID_PROFILES
+    }
 
     // Parser mapping for different config types (lazy initialized)
     private val configFmtParsers: Map<String, (String) -> ProfileItem?> by lazy {
@@ -69,7 +85,7 @@ object AngConfigManager {
             Utils.setClipboard(context, conf)
 
         } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "Failed to share config to clipboard", e)
+            LogUtil.e(AppConfig.TAG, "Failed to share config to clipboard: ${e.javaClass.simpleName}")
             return -1
         }
         return 0
@@ -98,7 +114,10 @@ object AngConfigManager {
             }
             return sb.lines().count() - 1
         } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "Failed to share non-custom configs to clipboard", e)
+            LogUtil.e(
+                AppConfig.TAG,
+                "Failed to share non-custom configs to clipboard: ${e.javaClass.simpleName}",
+            )
             return -1
         }
     }
@@ -118,7 +137,7 @@ object AngConfigManager {
             return QRCodeDecoder.createQRCode(conf)
 
         } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "Failed to share config as QR code", e)
+            LogUtil.e(AppConfig.TAG, "Failed to share config as QR code: ${e.javaClass.simpleName}")
             return null
         }
     }
@@ -140,7 +159,10 @@ object AngConfigManager {
                 return -1
             }
         } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "Failed to share full content to clipboard", e)
+            LogUtil.e(
+                AppConfig.TAG,
+                "Failed to share full content to clipboard: ${e.javaClass.simpleName}",
+            )
             return -1
         }
         return 0
@@ -167,7 +189,7 @@ object AngConfigManager {
                 else -> {}
             }
         } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "Failed to share config for GUID: $guid", e)
+            LogUtil.e(AppConfig.TAG, "Failed to share config for GUID: $guid (${e.javaClass.simpleName})")
             return ""
         }
     }
@@ -182,12 +204,12 @@ object AngConfigManager {
      */
     fun importBatchConfig(server: String?, subid: String, append: Boolean): Pair<Int, Int> {
         return try {
-            var count = parseBatchConfig(Utils.decode(server), subid, append)
-            if (count <= 0) {
-                count = parseBatchConfig(server, subid, append)
+            var configResult = parseBatchConfig(Utils.decode(server), subid, append)
+            if (configResult.shouldTryNextParser) {
+                configResult = parseBatchConfig(server, subid, append)
             }
-            if (count <= 0) {
-                count = parseCustomConfigServer(server, subid, append)
+            if (configResult.shouldTryNextParser) {
+                configResult = parseCustomConfigServer(server, subid, append)
             }
 
             var countSub = parseBatchSubscription(server)
@@ -198,9 +220,9 @@ object AngConfigManager {
                 updateConfigViaSubAll()
             }
 
-            count to countSub
+            configResult.configCount to countSub
         } catch (e: ProfileStorageException) {
-            LogUtil.e(AppConfig.TAG, "Failed to store imported profiles", e)
+            LogUtil.e(AppConfig.TAG, "Failed to store imported profiles: ${e.javaClass.simpleName}")
             0 to 0
         }
     }
@@ -227,7 +249,7 @@ object AngConfigManager {
                 }
             return count
         } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "Failed to parse batch subscription", e)
+            LogUtil.e(AppConfig.TAG, "Failed to parse batch subscription: ${e.javaClass.simpleName}")
         }
         return 0
     }
@@ -240,10 +262,15 @@ object AngConfigManager {
      * @param append Whether to append the configurations.
      * @return The number of configurations parsed.
      */
-    private fun parseBatchConfig(servers: String?, subid: String, append: Boolean): Int {
+    private fun parseBatchConfig(
+        servers: String?,
+        subid: String,
+        append: Boolean,
+        expectedSubscriptionUrl: String? = null,
+    ): ProfileCommitResult {
         try {
             if (servers == null) {
-                return 0
+                return ProfileCommitResult()
             }
             val subItem = MmkvManager.decodeSubscription(subid)
 
@@ -259,21 +286,22 @@ object AngConfigManager {
                     }
                 }
 
-            if (configs.isNotEmpty()) {
+            return if (configs.isNotEmpty()) {
                 commitProfiles(
                     configs = configs.map(::ParsedProfile),
                     subid = subid,
                     append = append,
+                    expectedSubscriptionUrl = expectedSubscriptionUrl,
                 )
+            } else {
+                ProfileCommitResult()
             }
-
-            return configs.size
         } catch (e: ProfileStorageException) {
             throw e
         } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "Failed to parse batch config", e)
+            LogUtil.e(AppConfig.TAG, "Failed to parse batch config: ${e.javaClass.simpleName}")
         }
-        return 0
+        return ProfileCommitResult()
     }
 
     /**
@@ -287,21 +315,59 @@ object AngConfigManager {
         configs: List<ParsedProfile>,
         subid: String,
         append: Boolean,
-    ) {
+        expectedSubscriptionUrl: String? = null,
+    ): ProfileCommitResult {
+        val currentSubscriptionUrl = MmkvManager.decodeSubscription(subid)
+            ?.url
+            ?.takeIf { it.isNotBlank() }
+        val subscriptionHasRemoteSource = currentSubscriptionUrl != null
+        val excludedIdentities = if (subscriptionHasRemoteSource) {
+            MmkvManager.decodeLiteExcludedProfileIdentities(subid)
+        } else {
+            emptySet()
+        }
+        val acceptedConfigs = configs.filterNot { parsed ->
+            ProfileReplacement.stableIdentity(parsed.profile, parsed.rawConfig) in excludedIdentities
+        }
+        val reusableGuids = if (append) {
+            emptyMap()
+        } else {
+            MmkvManager.decodeServerList(subid)
+                .mapNotNull { guid ->
+                    MmkvManager.decodeServerConfig(guid)?.let { profile ->
+                        ProfileReplacement.stableIdentity(
+                            profile,
+                            MmkvManager.decodeServerRaw(guid),
+                        ) to guid
+                    }
+                }
+                .groupByTo(linkedMapOf(), keySelector = { it.first }, valueTransform = { it.second })
+                .mapValues { (_, guids) -> ArrayDeque(guids) }
+        }
         val keyToProfile = linkedMapOf<String, ProfileItem>()
         val rawConfigs = mutableMapOf<String, String>()
 
-        configs.forEach { parsed ->
-            val key = Utils.getUuid()
+        acceptedConfigs.forEach { parsed ->
+            val identity = ProfileReplacement.stableIdentity(parsed.profile, parsed.rawConfig)
+            val key = reusableGuids[identity]?.removeFirstOrNull() ?: Utils.getUuid()
             keyToProfile[key] = parsed.profile
             parsed.rawConfig?.let { raw -> rawConfigs[key] = raw }
         }
 
-        MmkvManager.saveServerProfiles(
+        val saveResult = MmkvManager.saveServerProfiles(
             profiles = keyToProfile,
             rawConfigs = rawConfigs,
             subscriptionId = subid,
             append = append,
+            expectedSubscriptionUrl = expectedSubscriptionUrl,
+        )
+        return ProfileCommitResult(
+            configCount = saveResult.profileCount,
+            state = if (saveResult.committed) {
+                ProfileCommitState.APPLIED
+            } else {
+                ProfileCommitState.STALE_SUBSCRIPTION
+            },
         )
     }
 
@@ -313,9 +379,14 @@ object AngConfigManager {
      * @param append Whether to append the configurations.
      * @return The number of configurations parsed.
      */
-    private fun parseCustomConfigServer(server: String?, subid: String, append: Boolean): Int {
+    private fun parseCustomConfigServer(
+        server: String?,
+        subid: String,
+        append: Boolean,
+        expectedSubscriptionUrl: String? = null,
+    ): ProfileCommitResult {
         if (server == null) {
-            return 0
+            return ProfileCommitResult()
         }
         if (server.contains("inbounds")
             && server.contains("outbounds")
@@ -335,13 +406,15 @@ object AngConfigManager {
                             rawConfig = JsonUtil.toJsonPretty(srv) ?: "",
                         )
                     }
-                    commitProfiles(configs, subid, append)
-                    return configs.size
+                    return commitProfiles(configs, subid, append, expectedSubscriptionUrl)
                 }
             } catch (e: ProfileStorageException) {
                 throw e
             } catch (e: Exception) {
-                LogUtil.e(AppConfig.TAG, "Failed to parse custom config server JSON array", e)
+                LogUtil.e(
+                    AppConfig.TAG,
+                    "Failed to parse custom config server JSON array: ${e.javaClass.simpleName}",
+                )
             }
 
             try {
@@ -349,37 +422,43 @@ object AngConfigManager {
                 val config = CustomFmt.parse(server)
                 config.subscriptionId = subid
                 config.description = generateDescription(config)
-                commitProfiles(
+                return commitProfiles(
                     configs = listOf(ParsedProfile(config, server)),
                     subid = subid,
                     append = append,
+                    expectedSubscriptionUrl = expectedSubscriptionUrl,
                 )
-                return 1
             } catch (e: ProfileStorageException) {
                 throw e
             } catch (e: Exception) {
-                LogUtil.e(AppConfig.TAG, "Failed to parse custom config server as single config", e)
+                LogUtil.e(
+                    AppConfig.TAG,
+                    "Failed to parse custom config server as single config: ${e.javaClass.simpleName}",
+                )
             }
-            return 0
+            return ProfileCommitResult()
         } else if (server.startsWith("[Interface]") && server.contains("[Peer]")) {
             try {
                 val config = WireguardFmt.parseWireguardConfFile(server)
                 config.subscriptionId = subid
                 config.description = generateDescription(config)
-                commitProfiles(
+                return commitProfiles(
                     configs = listOf(ParsedProfile(config, server)),
                     subid = subid,
                     append = append,
+                    expectedSubscriptionUrl = expectedSubscriptionUrl,
                 )
-                return 1
             } catch (e: ProfileStorageException) {
                 throw e
             } catch (e: Exception) {
-                LogUtil.e(AppConfig.TAG, "Failed to parse WireGuard config file", e)
+                LogUtil.e(
+                    AppConfig.TAG,
+                    "Failed to parse WireGuard config file: ${e.javaClass.simpleName}",
+                )
             }
-            return 0
+            return ProfileCommitResult()
         } else {
-            return 0
+            return ProfileCommitResult()
         }
     }
 
@@ -428,7 +507,7 @@ object AngConfigManager {
 
             return config
         } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "Failed to parse config", e)
+            LogUtil.e(AppConfig.TAG, "Failed to parse config: ${e.javaClass.simpleName}")
             return null
         }
     }
@@ -445,7 +524,10 @@ object AngConfigManager {
                 acc + updateConfigViaSub(subscription)
             }
         } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "Failed to update config via all subscriptions", e)
+            LogUtil.e(
+                AppConfig.TAG,
+                "Failed to update config via all subscriptions: ${e.javaClass.simpleName}",
+            )
             SubscriptionUpdateResult()
         }
     }
@@ -480,7 +562,7 @@ object AngConfigManager {
                     return SubscriptionUpdateResult(failureCount = 1)
                 }
             }
-            LogUtil.i(AppConfig.TAG, url)
+            LogUtil.i(AppConfig.TAG, "Updating subscription: ${it.guid}")
             val userAgent = it.subscription.userAgent
             val requestHeaders = it.subscription.requestHeaders
             val proxyUsername = SettingsManager.getSocksUsername()
@@ -500,7 +582,11 @@ object AngConfigManager {
                     )
                 )
             } catch (e: Exception) {
-                LogUtil.e(AppConfig.ANG_PACKAGE, "Update subscription: proxy not ready or other error", e)
+                // HTTP exceptions frequently embed the full subscription URL (and token).
+                LogUtil.e(
+                    AppConfig.ANG_PACKAGE,
+                    "Update subscription: proxy not ready or other error: ${e.javaClass.simpleName}",
+                )
                 ""
             }
             if (configText.isEmpty()) {
@@ -513,7 +599,10 @@ object AngConfigManager {
                         )
                     )
                 } catch (e: Exception) {
-                    LogUtil.e(AppConfig.TAG, "Update subscription: Failed to get URL content with user agent", e)
+                    LogUtil.e(
+                        AppConfig.TAG,
+                        "Update subscription: Failed to get URL content: ${e.javaClass.simpleName}",
+                    )
                     ""
                 }
             }
@@ -521,13 +610,35 @@ object AngConfigManager {
                 return SubscriptionUpdateResult(failureCount = 1)
             }
 
-            val count = parseConfigViaSub(configText, it.guid, false)
-            if (count > 0) {
-                it.subscription.lastUpdated = System.currentTimeMillis()
-                MmkvManager.encodeSubscription(it.guid, it.subscription)
-                LogUtil.i(AppConfig.TAG, "Subscription updated: ${it.subscription.remarks}, $count configs")
+            val selectedBeforeUpdate = MmkvManager.getSelectServer()
+            val commitResult = parseConfigViaSub(
+                server = configText,
+                subid = it.guid,
+                append = false,
+                expectedSubscriptionUrl = it.subscription.url,
+            )
+            if (commitResult.applied) {
+                // The profile/index commit is already linearized. Reconcile before the timestamp
+                // CAS so a concurrent URL edit cannot leave the daemon running a removed node.
+                LauncherManager.reconcileSelectionChange(
+                    AngApplication.application,
+                    selectedBeforeUpdate,
+                    forceReload = true,
+                )
+                val timestampUpdated = MmkvManager.updateSubscriptionLastUpdatedIfUrlMatches(
+                    subscriptionId = it.guid,
+                    expectedUrl = it.subscription.url,
+                    timestamp = System.currentTimeMillis(),
+                )
+                if (!timestampUpdated) {
+                    return SubscriptionUpdateResult(failureCount = 1)
+                }
+                LogUtil.i(
+                    AppConfig.TAG,
+                    "Subscription updated: ${it.guid}, ${commitResult.configCount} configs",
+                )
                 return SubscriptionUpdateResult(
-                    configCount = count,
+                    configCount = commitResult.configCount,
                     successCount = 1
                 )
             } else {
@@ -535,7 +646,10 @@ object AngConfigManager {
                 return SubscriptionUpdateResult(failureCount = 1)
             }
         } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "Failed to update config via subscription", e)
+            LogUtil.e(
+                AppConfig.TAG,
+                "Failed to update config via subscription: ${e.javaClass.simpleName}",
+            )
             return SubscriptionUpdateResult(failureCount = 1)
         }
     }
@@ -551,7 +665,15 @@ object AngConfigManager {
             val aff = MmkvManager.decodeServerAffiliationInfo(it)
             aff != null && aff.testDelayMillis < 0L
         }
+        if (invalidServers.isEmpty()) return
+
+        val selectedBeforeRemoval = MmkvManager.getSelectServer()
         MmkvManager.removeServers(invalidServers, subId)
+        LauncherManager.reconcileSelectionChange(
+            AngApplication.application,
+            selectedBeforeRemoval,
+            forceReload = true,
+        )
     }
 
     /**
@@ -583,15 +705,25 @@ object AngConfigManager {
      * @param append Whether to append the configurations.
      * @return The number of configurations parsed.
      */
-    private fun parseConfigViaSub(server: String?, subid: String, append: Boolean): Int {
-        var count = parseBatchConfig(Utils.decode(server), subid, append)
-        if (count <= 0) {
-            count = parseBatchConfig(server, subid, append)
+    private fun parseConfigViaSub(
+        server: String?,
+        subid: String,
+        append: Boolean,
+        expectedSubscriptionUrl: String,
+    ): ProfileCommitResult {
+        var result = parseBatchConfig(
+            Utils.decode(server),
+            subid,
+            append,
+            expectedSubscriptionUrl,
+        )
+        if (result.shouldTryNextParser) {
+            result = parseBatchConfig(server, subid, append, expectedSubscriptionUrl)
         }
-        if (count <= 0) {
-            count = parseCustomConfigServer(server, subid, append)
+        if (result.shouldTryNextParser) {
+            result = parseCustomConfigServer(server, subid, append, expectedSubscriptionUrl)
         }
-        return count
+        return result
     }
 
     /**
@@ -601,18 +733,11 @@ object AngConfigManager {
      * @return The number of subscriptions imported.
      */
     private fun importUrlAsSubscription(url: String): Int {
-        val subscriptions = MmkvManager.decodeSubscriptions()
-        subscriptions.forEach {
-            if (it.subscription.url == url) {
-                return 0
-            }
-        }
         val uri = URI(Utils.fixIllegalUrl(url))
         val subItem = SubscriptionItem()
         subItem.remarks = uri.fragment ?: "import sub"
         subItem.url = url
-        MmkvManager.encodeSubscription("", subItem)
-        return 1
+        return if (MmkvManager.encodeSubscriptionIfUrlAbsent(subItem)) 1 else 0
     }
 
     /** Generates a description for the profile.

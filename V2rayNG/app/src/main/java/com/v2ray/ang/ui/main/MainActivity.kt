@@ -97,6 +97,11 @@ class MainActivity : HelperBaseComponentActivity() {
         checkAndRequestPermission(PermissionType.POST_NOTIFICATIONS) {}
     }
 
+    override fun onResume() {
+        super.onResume()
+        mainViewModel.onAction(MainAction.RefreshLiteDashboard)
+    }
+
     @Composable
     override fun ScreenContent() {
         BackHandler { moveTaskToBack(false) }
@@ -228,7 +233,10 @@ class MainActivity : HelperBaseComponentActivity() {
             val text = Utils.getClipboard(this)
             mainViewModel.onAction(MainAction.ImportBatchConfig(text))
         } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "Failed to import config from clipboard", e)
+            LogUtil.e(
+                AppConfig.TAG,
+                "Failed to import config from clipboard: ${e.javaClass.simpleName}",
+            )
         }
     }
 
@@ -240,7 +248,11 @@ class MainActivity : HelperBaseComponentActivity() {
                     mainViewModel.onAction(MainAction.ImportBatchConfig(reader.readText()))
                 }
             } catch (e: Exception) {
-                LogUtil.e(AppConfig.TAG, "Failed to read content from URI", e)
+                // Content-provider exceptions may echo the complete private document URI.
+                LogUtil.e(
+                    AppConfig.TAG,
+                    "Failed to read import content: ${e.javaClass.simpleName}",
+                )
             }
         }
     }

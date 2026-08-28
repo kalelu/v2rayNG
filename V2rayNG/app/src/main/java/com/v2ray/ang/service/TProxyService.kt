@@ -51,13 +51,12 @@ class TProxyService(
             writeText(configContent)
         }
 //        LogUtil.i(AppConfig.TAG, "Config file created: ${configFile.absolutePath}")
-        LogUtil.d(AppConfig.TAG, "HevSocks5Tunnel Config content:\n$configContent")
-
         try {
 //            LogUtil.i(AppConfig.TAG, "TProxyStartService...")
             TProxyStartService(configFile.absolutePath, vpnInterface.fd)
         } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "HevSocks5Tunnel exception: ${e.message}")
+            // The generated tunnel config contains local SOCKS credentials.
+            LogUtil.e(AppConfig.TAG, "HevSocks5Tunnel failed: ${e.javaClass.simpleName}")
         }
     }
 

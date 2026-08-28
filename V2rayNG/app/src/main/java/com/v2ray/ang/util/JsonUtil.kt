@@ -47,7 +47,7 @@ object JsonUtil {
         return try {
             gson.fromJson(src, cls)
         } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "Failed to parse JSON", e)
+            LogUtil.e(AppConfig.TAG, "Failed to parse JSON: ${e.javaClass.simpleName}")
             null
         }
     }
@@ -88,7 +88,7 @@ object JsonUtil {
         try {
             return JsonParser.parseString(src).getAsJsonObject()
         } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "Failed to parse JSON string", e)
+            LogUtil.e(AppConfig.TAG, "Failed to parse JSON string: ${e.javaClass.simpleName}")
             return null
         }
     }
@@ -107,7 +107,8 @@ object JsonUtil {
                 }
             }
         } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "Failed to parse headers JSON", e)
+            // Header parse failures may otherwise expose authorization values in the exception.
+            LogUtil.e(AppConfig.TAG, "Failed to parse headers JSON: ${e.javaClass.simpleName}")
         }
         return headerMap
     }

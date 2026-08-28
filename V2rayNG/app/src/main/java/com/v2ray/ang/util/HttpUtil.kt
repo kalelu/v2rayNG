@@ -91,11 +91,12 @@ object HttpUtil {
 
             val ipList = sortedAddresses.mapNotNull { it.hostAddress }
 
-            LogUtil.i(AppConfig.TAG, "Resolved IPs for $host: ${ipList.joinToString()}")
+            LogUtil.i(AppConfig.TAG, "Resolved ${ipList.size} IP address(es)")
 
             return ipList
         } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "Failed to resolve host to IP", e)
+            // DNS exceptions can include the private proxy hostname.
+            LogUtil.e(AppConfig.TAG, "Failed to resolve host to IP: ${e.javaClass.simpleName}")
             return null
         }
     }
@@ -128,7 +129,9 @@ object HttpUtil {
                 return response.body?.string()
             }
         } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "Failed to get URL content", e)
+            // OkHttp exception messages can include the complete request URL, including a
+            // subscription token. Keep the throwable itself out of production logs.
+            LogUtil.e(AppConfig.TAG, "Failed to get URL content: ${e.javaClass.simpleName}")
         }
         return null
     }
@@ -167,7 +170,7 @@ object HttpUtil {
 
             val headersMap = JsonUtil.parseHeadersToMap(request.requestHeaders)
             for ((key, value) in headersMap) {
-                LogUtil.d(AppConfig.TAG, "Adding custom header: $key = $value")
+                LogUtil.d(AppConfig.TAG, "Adding custom request header")
                 try {
                     requestBuilder.header(key, value)
                 } catch (_: IllegalArgumentException) {
@@ -286,7 +289,7 @@ object HttpUtil {
         return try {
             client.newCall(requestBuilder.build()).execute().use { response ->
                 if (!response.isSuccessful) {
-                    LogUtil.w(AppConfig.TAG, "Failed to download file, code=${response.code}, url=$url")
+                    LogUtil.w(AppConfig.TAG, "Failed to download file, code=${response.code}")
                     return false
                 }
                 val body = response.body ?: return false
@@ -298,7 +301,9 @@ object HttpUtil {
                 true
             }
         } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "Failed to download file: $url", e)
+            // Download URLs can contain access tokens. Keep both the URL and exception message
+            // out of logs because some HTTP exceptions embed the complete request URL.
+            LogUtil.e(AppConfig.TAG, "Failed to download file: ${e.javaClass.simpleName}")
             false
         }
     }

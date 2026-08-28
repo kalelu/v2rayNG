@@ -89,6 +89,16 @@ object AppConfig {
     const val PREF_AUTO_REMOVE_INVALID_AFTER_TEST = "pref_auto_remove_invalid_after_test"
     const val PREF_AUTO_SORT_AFTER_TEST = "pref_auto_sort_after_test"
     const val PREF_REAL_PING_CONCURRENCY = "pref_real_ping_concurrency"
+    const val PREF_LITE_INITIALIZED = "pref_lite_initialized"
+    const val PREF_LITE_CANDIDATE_GUIDS = "pref_lite_candidate_guids"
+    const val PREF_LITE_EXCLUDED_PROFILE_IDENTITIES_PREFIX = "pref_lite_excluded_profile_identities_"
+    const val PREF_LITE_AUTO_OPTIMIZE = "pref_lite_auto_optimize"
+    const val PREF_LITE_ENERGY_SAMPLES = "pref_lite_energy_samples"
+    const val PREF_LITE_ENERGY_BASELINE = "pref_lite_energy_baseline"
+    const val PREF_LITE_LAST_OPTIMIZE = "pref_lite_last_optimize"
+
+    const val LITE_ENERGY_TASK_NAME = "japan_proxy_energy_sampler"
+    const val LITE_OPTIMIZE_TASK_NAME = "japan_proxy_auto_optimizer"
 
     /** Cache keys. */
     const val CACHE_SUBSCRIPTION_ID = "cache_subscription_id"

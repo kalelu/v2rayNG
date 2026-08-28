@@ -14,6 +14,8 @@ import com.tencent.mmkv.MMKVLogLevel
 import com.tencent.mmkv.MMKVRecoverStrategic
 import com.v2ray.ang.AppConfig.DEFAULT_SUBSCRIPTION_ID
 import com.v2ray.ang.AppConfig.PREF_IS_BOOTED
+import com.v2ray.ang.AppConfig.PREF_LITE_CANDIDATE_GUIDS
+import com.v2ray.ang.AppConfig.PREF_LITE_EXCLUDED_PROFILE_IDENTITIES_PREFIX
 import com.v2ray.ang.AppConfig.PREF_ROUTING_RULESET
 import com.v2ray.ang.AppConfig.TAG
 import com.v2ray.ang.BuildConfig
@@ -32,6 +34,11 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 
 internal class ProfileStorageException(message: String) : IllegalStateException(message)
+
+internal data class ServerProfileSaveResult(
+    val profileCount: Int,
+    val committed: Boolean,
+)
 
 object MmkvManager {
 
@@ -87,6 +94,132 @@ object MmkvManager {
         }
     }
 
+    private inline fun <T> withSettingsStorageLock(block: () -> T): T {
+        return synchronized(settingsStorage) {
+            settingsStorage.lock()
+            try {
+                block()
+            } finally {
+                settingsStorage.unlock()
+            }
+        }
+    }
+
+    internal fun decodeLiteCandidateGuids(): Set<String> = withSettingsStorageLock {
+        settingsStorage.decodeStringSet(PREF_LITE_CANDIDATE_GUIDS)?.toSet().orEmpty()
+    }
+
+    internal fun replaceLiteCandidateGuids(guids: Set<String>) {
+        withSettingsStorageLock {
+            settingsStorage.encode(PREF_LITE_CANDIDATE_GUIDS, guids.toMutableSet())
+        }
+    }
+
+    internal fun toggleLiteCandidateGuid(guid: String): Set<String> = withSettingsStorageLock {
+        val candidates = settingsStorage.decodeStringSet(PREF_LITE_CANDIDATE_GUIDS)
+            ?.toMutableSet()
+            ?: mutableSetOf()
+        if (!candidates.add(guid)) candidates.remove(guid)
+        settingsStorage.encode(PREF_LITE_CANDIDATE_GUIDS, candidates)
+        candidates.toSet()
+    }
+
+    internal fun retainLiteCandidateGuids(validGuids: Set<String>): Set<String> =
+        withSettingsStorageLock {
+            val current = settingsStorage.decodeStringSet(PREF_LITE_CANDIDATE_GUIDS)
+                ?.toSet()
+                .orEmpty()
+            val retained = current.intersect(validGuids)
+            if (retained != current) {
+                settingsStorage.encode(PREF_LITE_CANDIDATE_GUIDS, retained.toMutableSet())
+            }
+            retained
+        }
+
+    internal fun removeLiteCandidateReferences(guids: Collection<String>) {
+        if (guids.isEmpty()) return
+        withSettingsStorageLock {
+            val candidates = settingsStorage.decodeStringSet(PREF_LITE_CANDIDATE_GUIDS)
+                ?.toMutableSet()
+                ?: return@withSettingsStorageLock
+            if (candidates.removeAll(guids.toSet())) {
+                settingsStorage.encode(PREF_LITE_CANDIDATE_GUIDS, candidates)
+            }
+        }
+    }
+
+    private fun clearLiteCandidateReferences() {
+        withSettingsStorageLock {
+            settingsStorage.remove(PREF_LITE_CANDIDATE_GUIDS)
+        }
+    }
+
+    private fun liteExcludedProfileKey(subscriptionId: String): String =
+        "$PREF_LITE_EXCLUDED_PROFILE_IDENTITIES_PREFIX${getSubscriptionId(subscriptionId)}"
+
+    internal fun decodeLiteExcludedProfileIdentities(subscriptionId: String): Set<String> =
+        withSettingsStorageLock {
+            settingsStorage.decodeStringSet(liteExcludedProfileKey(subscriptionId))
+                ?.toSet()
+                .orEmpty()
+        }
+
+    private fun addLiteExcludedProfileIdentity(subscriptionId: String, identity: String) {
+        if (identity.isBlank()) return
+        withSettingsStorageLock {
+            val key = liteExcludedProfileKey(subscriptionId)
+            val identities = settingsStorage.decodeStringSet(key)?.toMutableSet() ?: mutableSetOf()
+            if (identities.add(identity)) {
+                requireStorageWrite(
+                    settingsStorage.encode(key, identities),
+                    "Failed to remember the deleted subscription profile",
+                )
+            }
+        }
+    }
+
+    private fun clearLiteExcludedProfileIdentities(subscriptionId: String) {
+        withSettingsStorageLock {
+            settingsStorage.remove(liteExcludedProfileKey(subscriptionId))
+        }
+    }
+
+    private fun selectReplacementAfterRemoval(removedGuids: Set<String>) {
+        val selectedGuid = getSelectServer() ?: return
+        if (selectedGuid !in removedGuids) return
+
+        val replacementGuid = decodeAllServerList().firstOrNull { guid ->
+            guid !in removedGuids && decodeServerConfig(guid) != null
+        }
+        if (replacementGuid == null) {
+            mainStorage.remove(KEY_SELECTED_SERVER)
+        } else {
+            requireStorageWrite(
+                mainStorage.encode(KEY_SELECTED_SERVER, replacementGuid),
+                "Failed to select a replacement profile",
+            )
+        }
+    }
+
+    private fun removeServerReferencesFromAllIndexes(guids: Set<String>) {
+        if (guids.isEmpty()) return
+        mainStorage.allKeys()
+            ?.asSequence()
+            ?.filter { it.startsWith(KEY_SUB_SERVER_PREFIX) }
+            ?.forEach { key ->
+                val json = mainStorage.decodeString(key) ?: return@forEach
+                val serverIds = JsonUtil.fromJsonSafe(json, Array<String>::class.java)
+                    ?.toMutableList()
+                    ?: return@forEach
+                if (serverIds.removeAll(guids)) {
+                    requireStorageWrite(
+                        mainStorage.encode(key, JsonUtil.toJson(serverIds)),
+                        "Failed to remove profile references",
+                    )
+                }
+            }
+    }
+
     private fun removeProfilePayloads(guids: Collection<String>) {
         if (guids.isEmpty()) return
         val keys = guids.toTypedArray()
@@ -101,6 +234,10 @@ object MmkvManager {
 
     private fun persistServerList(serverList: List<String>, subscriptionId: String): Boolean {
         return mainStorage.encode(serverListKey(subscriptionId), JsonUtil.toJson(serverList))
+    }
+
+    private fun persistSubsList(subsList: List<String>): Boolean {
+        return mainStorage.encode(KEY_SUB_IDS, JsonUtil.toJson(subsList))
     }
 
     private fun serverListKey(subscriptionId: String): String {
@@ -185,6 +322,26 @@ object MmkvManager {
             mainStorage.encode(KEY_SELECTED_SERVER, guid)
         }
     }
+
+    /** Atomically selects a profile only while it is still published and decodable. */
+    fun setSelectServerIfExists(guid: String): Boolean = withProfileIndexLock {
+        if (decodeServerConfig(guid) == null || guid !in decodeAllServerList()) {
+            return@withProfileIndexLock false
+        }
+        mainStorage.encode(KEY_SELECTED_SERVER, guid)
+    }
+
+    /** Compare-and-set selection used by long-running probes so they cannot override a user choice. */
+    fun setSelectServerIfCurrentAndExists(expectedGuid: String?, newGuid: String): Boolean =
+        withProfileIndexLock {
+            if (getSelectServer() != expectedGuid ||
+                decodeServerConfig(newGuid) == null ||
+                newGuid !in decodeAllServerList()
+            ) {
+                return@withProfileIndexLock false
+            }
+            mainStorage.encode(KEY_SELECTED_SERVER, newGuid)
+        }
 
     /**
      * Encodes the server list for a given subscription.
@@ -309,10 +466,51 @@ object MmkvManager {
         rawConfigs: Map<String, String>,
         subscriptionId: String,
         append: Boolean,
-    ) {
-        if (profiles.isEmpty()) return
+        expectedSubscriptionUrl: String? = null,
+    ): ServerProfileSaveResult = withProfileIndexLock {
+            // A network update may finish after its subscription was deleted or edited. Reject
+            // that stale batch before it can recreate a hidden group or revive removed profiles.
+            if (!SubscriptionWriteGuard.allows(
+                    expectedUrl = expectedSubscriptionUrl,
+                    currentUrl = decodeSubscription(subscriptionId)?.url,
+                    isIndexed = subscriptionId in decodeSubsList(),
+                )
+            ) {
+                return@withProfileIndexLock ServerProfileSaveResult(
+                    profileCount = 0,
+                    committed = false,
+                )
+            }
+            // Re-read exclusions while holding the same inter-process lock used by deletion.
+            // This closes the race where a refresh parsed a node just before the user deleted it.
+            val excludedIdentities = if (
+                decodeSubscription(subscriptionId)?.url?.isNotBlank() == true
+            ) {
+                decodeLiteExcludedProfileIdentities(subscriptionId)
+            } else {
+                emptySet()
+            }
+            val acceptedProfiles = if (excludedIdentities.isEmpty()) {
+                profiles
+            } else {
+                profiles.filter { (guid, profile) ->
+                    ProfileReplacement.stableIdentity(profile, rawConfigs[guid]) !in excludedIdentities
+                }
+            }
+            val acceptedRawConfigs = rawConfigs.filterKeys(acceptedProfiles::containsKey)
 
-        withProfileIndexLock {
+            // A valid response may contain only profiles that the user explicitly deleted.
+            // Publish that empty replacement under the same URL CAS and profile-index lock so
+            // stale supplier nodes disappear, while a deleted/edited subscription remains safe.
+            if (!append && acceptedProfiles.isEmpty()) {
+                val removedGuids = removeServersViaSubidLocked(subscriptionId)
+                removeLiteCandidateReferences(removedGuids)
+                return@withProfileIndexLock ServerProfileSaveResult(
+                    profileCount = 0,
+                    committed = true,
+                )
+            }
+
             val replacedServers = if (append) {
                 emptyList()
             } else {
@@ -328,17 +526,17 @@ object MmkvManager {
                 null
             }
             val replacementSelection = ProfileReplacement.findSelectedReplacement(
-                profiles = profiles,
+                profiles = acceptedProfiles,
                 currentSelection = previousSelection,
                 selectedProfile = selectedProfile,
             )
 
-            profiles.forEach { (guid, profile) ->
+            acceptedProfiles.forEach { (guid, profile) ->
                 requireStorageWrite(
                     profileFullStorage.encode(guid, JsonUtil.toJson(profile)),
                     "Failed to save profile payload",
                 )
-                rawConfigs[guid]?.let { raw ->
+                acceptedRawConfigs[guid]?.let { raw ->
                     requireStorageWrite(
                         serverRawStorage.encode(guid, raw),
                         "Failed to save raw profile payload",
@@ -352,7 +550,7 @@ object MmkvManager {
                 mutableListOf()
             }
             val indexedServers = serverList.toHashSet()
-            profiles.keys.forEach { guid ->
+            acceptedProfiles.keys.forEach { guid ->
                 if (indexedServers.add(guid)) {
                     serverList.add(0, guid)
                 }
@@ -367,45 +565,66 @@ object MmkvManager {
                     "Failed to update selected profile",
                 )
             }
-            if (replacedServers.isEmpty()) return@withProfileIndexLock
+            if (replacedServers.isEmpty()) {
+                return@withProfileIndexLock ServerProfileSaveResult(
+                    profileCount = acceptedProfiles.size,
+                    committed = true,
+                )
+            }
 
             val protectedServer = replacementSelection ?: previousSelection
             val referencedByOtherGroups = decodeServersReferencedByOtherGroups(subscriptionId)
             val removablePayloads = ProfileReplacement.findRemovablePayloads(
                 replacedServers = replacedServers,
-                replacementServers = profiles.keys,
+                replacementServers = acceptedProfiles.keys,
                 protectedServer = protectedServer,
                 serversReferencedByOtherGroups = referencedByOtherGroups,
             )
             removeProfilePayloads(removablePayloads)
+            ServerProfileSaveResult(
+                profileCount = acceptedProfiles.size,
+                committed = true,
+            )
         }
-    }
 
     /**
      * Removes the server configuration.
      *
      * @param guid The server GUID.
      */
-    fun removeServer(guid: String) {
+    fun removeServer(guid: String, rememberSubscriptionExclusion: Boolean = false) {
         if (guid.isBlank()) {
             return
         }
 
-        // Get config to determine which subscription to update
-        val config = decodeServerConfig(guid)
-        val subId = getSubscriptionId(config?.subscriptionId)
-
-        // Remove from appropriate server list
-        val serverList = decodeServerList(subId)
-        serverList.remove(guid)
-        encodeServerList(serverList, subId)
-
-        // Clean up storage
-        if (getSelectServer() == guid) {
-            mainStorage.remove(KEY_SELECTED_SERVER)
+        val removedGuids = setOf(guid)
+        withProfileIndexLock {
+            val exclusion = if (rememberSubscriptionExclusion) {
+                decodeServerConfig(guid)
+                    ?.takeIf { profile ->
+                        profile.subscriptionId.isNotBlank() &&
+                            decodeSubscription(profile.subscriptionId)?.url?.isNotBlank() == true
+                    }
+                    ?.let { profile ->
+                        profile.subscriptionId to ProfileReplacement.stableIdentity(
+                            profile,
+                            decodeServerRaw(guid),
+                        )
+                    }
+            } else {
+                null
+            }
+            exclusion?.let { (subscriptionId, identity) ->
+                // Lock order is always profile index -> settings. Refresh uses the same order.
+                addLiteExcludedProfileIdentity(subscriptionId, identity)
+            }
+            // A GUID is a global profile identity. Remove every stale index reference even if
+            // its payload is damaged and can no longer tell us which subscription owned it.
+            removeServerReferencesFromAllIndexes(removedGuids)
+            selectReplacementAfterRemoval(removedGuids)
+            removeProfilePayloads(removedGuids)
         }
-        profileFullStorage.remove(guid)
-        serverAffStorage.remove(guid)
+        removeLiteCandidateReferences(removedGuids)
     }
 
     /**
@@ -415,19 +634,24 @@ object MmkvManager {
      */
     fun removeServerViaSubid(subscriptionId: String?) {
         val subId = getSubscriptionId(subscriptionId)
-        val serverList = decodeServerList(subId)
+        val removedGuids = withProfileIndexLock { removeServersViaSubidLocked(subId) }
+        removeLiteCandidateReferences(removedGuids)
+    }
 
-        // Remove all servers in the list
-        serverList.forEach { guid ->
-            if (getSelectServer() == guid) {
-                mainStorage.remove(KEY_SELECTED_SERVER)
-            }
-            profileFullStorage.remove(guid)
-            serverAffStorage.remove(guid)
-        }
+    /** Must be called while [withProfileIndexLock] is held. */
+    private fun removeServersViaSubidLocked(subscriptionId: String): Set<String> {
+        val subId = getSubscriptionId(subscriptionId)
+        val serverList = decodeServerList(subId).toSet()
 
-        serverList.clear()
-        encodeServerList(serverList, subId)
+        // Remove the group key itself so a deleted subscription cannot leave a hidden index.
+        mainStorage.remove(serverListKey(subId))
+        if (serverList.isEmpty()) return emptySet()
+
+        val stillReferenced = decodeAllServerList().toSet()
+        val fullyRemoved = serverList - stillReferenced
+        selectReplacementAfterRemoval(fullyRemoved)
+        removeProfilePayloads(fullyRemoved)
+        return fullyRemoved
     }
 
     /**
@@ -439,20 +663,22 @@ object MmkvManager {
     fun removeServers(guids: List<String>, subscriptionId: String) {
         if (guids.isEmpty()) return
         val subId = getSubscriptionId(subscriptionId)
-        val serverList = decodeServerList(subId)
-        if (serverList.removeAll(guids)) {
-            encodeServerList(serverList, subId)
-        }
-
-        val selectedServer = getSelectServer()
-        guids.forEach { guid ->
-            if (selectedServer == guid) {
-                mainStorage.remove(KEY_SELECTED_SERVER)
+        val removedGuids: Set<String> = withProfileIndexLock {
+            val serverList = decodeServerList(subId)
+            if (!serverList.removeAll(guids.toSet())) {
+                return@withProfileIndexLock emptySet()
             }
-            profileFullStorage.remove(guid)
-            serverAffStorage.remove(guid)
-            serverRawStorage.remove(guid)
+            requireStorageWrite(
+                persistServerList(serverList, subId),
+                "Failed to update subscription profile index",
+            )
+            val stillReferenced = decodeAllServerList().toSet()
+            val fullyRemoved = guids.toSet() - stillReferenced
+            selectReplacementAfterRemoval(fullyRemoved)
+            removeProfilePayloads(fullyRemoved)
+            fullyRemoved
         }
+        removeLiteCandidateReferences(removedGuids)
     }
 
     /**
@@ -473,19 +699,24 @@ object MmkvManager {
     }
 
     /**
-     * Encodes the server test delay in milliseconds.
+     * Encodes the server test delay only while the profile still exists.
+     *
+     * The existence check and affiliation write share the profile-index lock with deletion, so a
+     * late probe result cannot recreate affiliation data after its profile has been removed.
      *
      * @param guid The server GUID.
      * @param testResult The test delay in milliseconds.
+     * @return Whether the profile still existed and the delay was written.
      */
-    fun encodeServerTestDelayMillis(guid: String, testResult: Long) {
-        if (guid.isBlank()) {
-            return
+    fun encodeServerTestDelayIfProfileExists(guid: String, testResult: Long): Boolean =
+        withProfileIndexLock {
+            if (guid.isBlank() || decodeServerConfig(guid) == null) {
+                return@withProfileIndexLock false
+            }
+            val aff = decodeServerAffiliationInfo(guid) ?: ServerAffiliationInfo()
+            aff.testDelayMillis = testResult
+            serverAffStorage.encode(guid, JsonUtil.toJson(aff))
         }
-        val aff = decodeServerAffiliationInfo(guid) ?: ServerAffiliationInfo()
-        aff.testDelayMillis = testResult
-        serverAffStorage.encode(guid, JsonUtil.toJson(aff))
-    }
 
     /**
      * Clears all test delay results.
@@ -493,10 +724,13 @@ object MmkvManager {
      * @param keys The list of server GUIDs.
      */
     fun clearAllTestDelayResults(keys: List<String>?) {
-        keys?.forEach { key ->
-            decodeServerAffiliationInfo(key)?.let { aff ->
-                aff.testDelayMillis = 0
-                serverAffStorage.encode(key, JsonUtil.toJson(aff))
+        withProfileIndexLock {
+            keys?.forEach { key ->
+                if (decodeServerConfig(key) == null) return@forEach
+                decodeServerAffiliationInfo(key)?.let { aff ->
+                    aff.testDelayMillis = 0
+                    serverAffStorage.encode(key, JsonUtil.toJson(aff))
+                }
             }
         }
     }
@@ -507,14 +741,19 @@ object MmkvManager {
      * @return The number of server configurations removed.
      */
     fun removeAllServer(): Int {
-        val count = profileFullStorage.allKeys()?.count() ?: 0
-        profileFullStorage.clearAll()
-        serverAffStorage.clearAll()
-        serverRawStorage.clearAll()
-
-        decodeSubscriptions().forEach { sub ->
-            encodeServerList(mutableListOf(), sub.guid)
+        val count = withProfileIndexLock {
+            val storedCount = profileFullStorage.allKeys()?.count() ?: 0
+            profileFullStorage.clearAll()
+            serverAffStorage.clearAll()
+            serverRawStorage.clearAll()
+            mainStorage.allKeys()
+                ?.filter { it.startsWith(KEY_SUB_SERVER_PREFIX) }
+                ?.takeIf { it.isNotEmpty() }
+                ?.let { mainStorage.removeValuesForKeys(it.toTypedArray()) }
+            mainStorage.remove(KEY_SELECTED_SERVER)
+            storedCount
         }
+        clearLiteCandidateReferences()
         return count
     }
 
@@ -627,15 +866,14 @@ object MmkvManager {
     /**
      * Initializes the subscription list.
      */
-    private fun initSubsList() {
+    private fun initSubsList() = withProfileIndexLock {
         val subsList = decodeSubsList()
+        if (subsList.isNotEmpty()) return@withProfileIndexLock
+
+        subStorage.allKeys()?.forEach { key -> subsList.add(key) }
         if (subsList.isNotEmpty()) {
-            return
+            requireStorageWrite(persistSubsList(subsList), "Failed to initialize subscription index")
         }
-        subStorage.allKeys()?.forEach { key ->
-            subsList.add(key)
-        }
-        encodeSubsList(subsList)
     }
 
     /**
@@ -663,12 +901,19 @@ object MmkvManager {
      * @param subid The subscription ID.
      */
     fun removeSubscription(subid: String) {
-        subStorage.remove(subid)
-        val subsList = decodeSubsList()
-        subsList.remove(subid)
-        encodeSubsList(subsList)
-
-        removeServerViaSubid(subid)
+        val removedGuids = withProfileIndexLock {
+            val subsList = decodeSubsList()
+            if (subsList.remove(subid)) {
+                requireStorageWrite(
+                    persistSubsList(subsList),
+                    "Failed to update subscription index",
+                )
+            }
+            subStorage.remove(subid)
+            removeServersViaSubidLocked(subid)
+        }
+        removeLiteCandidateReferences(removedGuids)
+        clearLiteExcludedProfileIdentities(subid)
     }
 
     /**
@@ -679,13 +924,75 @@ object MmkvManager {
      */
     fun encodeSubscription(guid: String, subItem: SubscriptionItem) {
         val key = guid.ifBlank { Utils.getUuid() }
-        subStorage.encode(key, JsonUtil.toJson(subItem))
+        withProfileIndexLock {
+            requireStorageWrite(
+                subStorage.encode(key, JsonUtil.toJson(subItem)),
+                "Failed to save subscription",
+            )
 
-        val subsList = decodeSubsList()
-        if (!subsList.contains(key)) {
-            subsList.add(key)
-            encodeSubsList(subsList)
+            val subsList = decodeSubsList()
+            if (!subsList.contains(key)) {
+                subsList.add(key)
+                requireStorageWrite(
+                    persistSubsList(subsList),
+                    "Failed to publish subscription index",
+                )
+            }
         }
+    }
+
+    /**
+     * Publishes a newly imported URL subscription only when that URL is not already present.
+     *
+     * The duplicate check and both storage writes share the cross-process profile-index lock so
+     * concurrent external intents cannot create two groups for the same subscription URL.
+     *
+     * @return Whether a new subscription was published.
+     */
+    fun encodeSubscriptionIfUrlAbsent(subItem: SubscriptionItem): Boolean = withProfileIndexLock {
+        val subsList = decodeSubsList()
+        // Preserve subscriptions from older installations whose index has not been initialized.
+        subStorage.allKeys().orEmpty().forEach { key ->
+            if (key !in subsList) subsList.add(key)
+        }
+        if (subsList.any { key -> decodeSubscription(key)?.url == subItem.url }) {
+            return@withProfileIndexLock false
+        }
+
+        val key = Utils.getUuid()
+        requireStorageWrite(
+            subStorage.encode(key, JsonUtil.toJson(subItem)),
+            "Failed to save imported subscription",
+        )
+        subsList.add(key)
+        requireStorageWrite(
+            persistSubsList(subsList),
+            "Failed to publish imported subscription",
+        )
+        true
+    }
+
+    /**
+     * Updates only the current subscription timestamp when the network request still belongs to
+     * the same published URL. A deleted or edited subscription is never recreated from stale data.
+     */
+    fun updateSubscriptionLastUpdatedIfUrlMatches(
+        subscriptionId: String,
+        expectedUrl: String,
+        timestamp: Long,
+    ): Boolean = withProfileIndexLock {
+        val current = decodeSubscription(subscriptionId)
+        if (!SubscriptionWriteGuard.allows(
+                expectedUrl = expectedUrl,
+                currentUrl = current?.url,
+                isIndexed = subscriptionId in decodeSubsList(),
+            )
+        ) {
+            return@withProfileIndexLock false
+        }
+
+        current!!.lastUpdated = timestamp
+        subStorage.encode(subscriptionId, JsonUtil.toJson(current))
     }
 
     /**
@@ -705,7 +1012,9 @@ object MmkvManager {
      * @param subsList The list of subscription IDs.
      */
     fun encodeSubsList(subsList: MutableList<String>) {
-        mainStorage.encode(KEY_SUB_IDS, JsonUtil.toJson(subsList))
+        withProfileIndexLock {
+            requireStorageWrite(persistSubsList(subsList), "Failed to save subscription index")
+        }
     }
 
     /**

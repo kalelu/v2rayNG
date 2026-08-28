@@ -83,7 +83,10 @@ object ShadowsocksFmt : FmtBase() {
                 config.remarks =
                     Utils.decodeURIComponent(result.substring(indexSplit + 1, result.length))
             } catch (e: Exception) {
-                LogUtil.e(AppConfig.TAG, "Failed to decode remarks in SS legacy URL", e)
+                LogUtil.e(
+                    AppConfig.TAG,
+                    "Failed to decode remarks in SS legacy URL: ${e.javaClass.simpleName}",
+                )
             }
 
             result = result.substring(0, indexSplit)

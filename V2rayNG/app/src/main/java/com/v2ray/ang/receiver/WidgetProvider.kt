@@ -4,6 +4,7 @@ import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.widget.RemoteViews
@@ -34,39 +35,11 @@ class WidgetProvider : AppWidgetProvider() {
      * @param appWidgetIds The appWidgetIds for which an update is needed.
      * @param isRunning Boolean indicating if the V2Ray service is running.
      */
-    private fun updateWidgetBackground(context: Context, appWidgetManager: AppWidgetManager, appWidgetIds: IntArray, isRunning: Boolean) {
-        val remoteViews = RemoteViews(context.packageName, R.layout.widget_switch)
-        val intent = Intent(context, WidgetProvider::class.java)
-        intent.action = AppConfig.BROADCAST_ACTION_WIDGET_CLICK
-        val pendingIntent = PendingIntent.getBroadcast(
-            context,
-            R.id.layout_switch,
-            intent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-        remoteViews.setOnClickPendingIntent(R.id.layout_switch, pendingIntent)
-        if (isRunning) {
-            remoteViews.setInt(R.id.image_switch, "setImageResource", R.drawable.ic_stop_24dp)
-            remoteViews.setInt(R.id.layout_background, "setBackgroundResource", R.drawable.ic_rounded_corner_active)
-        } else {
-            remoteViews.setInt(R.id.image_switch, "setImageResource", R.drawable.ic_play_24dp)
-            remoteViews.setInt(R.id.layout_background, "setBackgroundResource", R.drawable.ic_rounded_corner_inactive)
-        }
+}
 
-        for (appWidgetId in appWidgetIds) {
-            appWidgetManager.updateAppWidget(appWidgetId, remoteViews)
-        }
-    }
-
-    /**
-     * This method is called when the BroadcastReceiver is receiving an Intent broadcast.
-     * It handles widget click actions and updates the widget background based on the V2Ray service state.
-     *
-     * @param context The Context in which the receiver is running.
-     * @param intent The Intent being received.
-     */
+/** Receives only app-internal widget clicks and daemon state updates. */
+class WidgetActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        super.onReceive(context, intent)
         if (AppConfig.BROADCAST_ACTION_WIDGET_CLICK == intent.action) {
             if (CoreServiceManager.isRunning()) {
                 LauncherManager.stopService(context)
@@ -92,5 +65,43 @@ class WidgetProvider : AppWidgetProvider() {
                 }
             }
         }
+    }
+}
+
+private fun updateWidgetBackground(
+    context: Context,
+    appWidgetManager: AppWidgetManager,
+    appWidgetIds: IntArray,
+    isRunning: Boolean,
+) {
+    val remoteViews = RemoteViews(context.packageName, R.layout.widget_switch)
+    val intent = Intent(context, WidgetActionReceiver::class.java).apply {
+        action = AppConfig.BROADCAST_ACTION_WIDGET_CLICK
+    }
+    val pendingIntent = PendingIntent.getBroadcast(
+        context,
+        R.id.layout_switch,
+        intent,
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+    )
+    remoteViews.setOnClickPendingIntent(R.id.layout_switch, pendingIntent)
+    if (isRunning) {
+        remoteViews.setInt(R.id.image_switch, "setImageResource", R.drawable.ic_stop_24dp)
+        remoteViews.setInt(
+            R.id.layout_background,
+            "setBackgroundResource",
+            R.drawable.ic_rounded_corner_active,
+        )
+    } else {
+        remoteViews.setInt(R.id.image_switch, "setImageResource", R.drawable.ic_play_24dp)
+        remoteViews.setInt(
+            R.id.layout_background,
+            "setBackgroundResource",
+            R.drawable.ic_rounded_corner_inactive,
+        )
+    }
+
+    for (appWidgetId in appWidgetIds) {
+        appWidgetManager.updateAppWidget(appWidgetId, remoteViews)
     }
 }

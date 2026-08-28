@@ -100,7 +100,10 @@ class SubscriptionUpdateService : Service() {
                         updateSingle(subId, message.forcedUpdate)
                     }
                 } catch (e: Exception) {
-                    LogUtil.e(AppConfig.TAG, "SubscriptionUpdateService update failed", e)
+                    LogUtil.e(
+                        AppConfig.TAG,
+                        "SubscriptionUpdateService update failed: ${e.javaClass.simpleName}",
+                    )
                 } finally {
                     if (runningTasks.decrementAndGet() == 0 && activeWorkers.isEmpty()) {
                         NotificationHelper.stopForeground(this@SubscriptionUpdateService)
@@ -119,7 +122,7 @@ class SubscriptionUpdateService : Service() {
 
         val sub = SubscriptionCache(subId, subItem)
 
-        LogUtil.i(AppConfig.TAG, "SubscriptionUpdateService: Updating ${subItem.remarks}")
+        LogUtil.i(AppConfig.TAG, "SubscriptionUpdateService: updating $subId")
         showNotification(
             context = this,
             titleResId = R.string.title_pref_auto_update_subscription,
@@ -134,7 +137,7 @@ class SubscriptionUpdateService : Service() {
             testSubscriptionServers(sub)
 
             if (MmkvManager.decodeSettingsBool(AppConfig.PREF_AUTO_REMOVE_INVALID_AFTER_TEST, false)) {
-                LogUtil.i(AppConfig.TAG, "SubscriptionUpdateService: removing invalid servers for ${subItem.remarks}")
+                LogUtil.i(AppConfig.TAG, "SubscriptionUpdateService: removing invalid servers for $subId")
                 showNotification(
                     context = this,
                     titleResId = R.string.title_del_invalid_config,
@@ -143,7 +146,7 @@ class SubscriptionUpdateService : Service() {
                 AngConfigManager.removeInvalidServer(subId)
             }
             if (MmkvManager.decodeSettingsBool(AppConfig.PREF_AUTO_SORT_AFTER_TEST, false)) {
-                LogUtil.i(AppConfig.TAG, "SubscriptionUpdateService: sorting servers for ${subItem.remarks}")
+                LogUtil.i(AppConfig.TAG, "SubscriptionUpdateService: sorting servers for $subId")
                 showNotification(
                     context = this,
                     titleResId = R.string.title_sort_by_test_results,
@@ -153,12 +156,12 @@ class SubscriptionUpdateService : Service() {
             }
         }
 
-        LogUtil.i(AppConfig.TAG, "SubscriptionUpdateService: Finished ${subItem.remarks}")
+        LogUtil.i(AppConfig.TAG, "SubscriptionUpdateService: finished $subId")
     }
 
     private suspend fun testSubscriptionServers(sub: SubscriptionCache) {
         val subId = sub.guid
-        LogUtil.i(AppConfig.TAG, "SubscriptionUpdateService: starting test phase for ${sub.subscription.remarks}")
+        LogUtil.i(AppConfig.TAG, "SubscriptionUpdateService: starting test phase for $subId")
         showNotification(
             context = this,
             titleResId = R.string.title_real_ping_all_server,
@@ -173,7 +176,7 @@ class SubscriptionUpdateService : Service() {
                 context = this,
                 guids = guids,
                 onEvent = { event ->
-                    handleWorkerEvent(event, sub.subscription.remarks) {
+                    handleWorkerEvent(event, sub.subscription.remarks, subId) {
                         activeWorkers.remove(worker)
                         deferred.complete(Unit)
                     }
@@ -182,11 +185,16 @@ class SubscriptionUpdateService : Service() {
             activeWorkers.add(worker)
             worker.start()
             deferred.await()
-            LogUtil.i(AppConfig.TAG, "SubscriptionUpdateService: test phase finished for ${sub.subscription.remarks}")
+            LogUtil.i(AppConfig.TAG, "SubscriptionUpdateService: test phase finished for $subId")
         }
     }
 
-    private fun handleWorkerEvent(event: RealPingEvent, remarks: String, onWorkerDone: () -> Unit) {
+    private fun handleWorkerEvent(
+        event: RealPingEvent,
+        remarks: String,
+        subId: String,
+        onWorkerDone: () -> Unit,
+    ) {
         when (event) {
             is RealPingEvent.Progress -> {
                 val notificationText = getString(
@@ -199,11 +207,11 @@ class SubscriptionUpdateService : Service() {
                     titleResId = R.string.title_real_ping_all_server,
                     content = notificationText
                 )
-                LogUtil.i(AppConfig.TAG, "SubscriptionUpdateService: ${event.text} in $remarks")
+                LogUtil.i(AppConfig.TAG, "SubscriptionUpdateService: test progress for $subId")
             }
 
             is RealPingEvent.Result -> {
-                MmkvManager.encodeServerTestDelayMillis(event.guid, event.delayMillis)
+                MmkvManager.encodeServerTestDelayIfProfileExists(event.guid, event.delayMillis)
             }
 
             is RealPingEvent.Finish -> {

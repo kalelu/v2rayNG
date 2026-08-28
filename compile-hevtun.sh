@@ -16,7 +16,11 @@ clear_tmp () {
 }
 trap 'echo -e "Aborted, error $? in command: $BASH_COMMAND"; trap ERR; clear_tmp; exit 1' ERR INT
 
-ABIS="armeabi-v7a arm64-v8a x86 x86_64"
+ABIS="${ABIS:-armeabi-v7a arm64-v8a x86 x86_64}"
+NDK_BUILD="$NDK_HOME/ndk-build"
+if [[ ! -f "$NDK_BUILD" && -f "$NDK_HOME/ndk-build.cmd" ]]; then
+  NDK_BUILD="$NDK_HOME/ndk-build.cmd"
+fi
 
 mkdir -p "$TMPDIR/jni"
 pushd "$TMPDIR"
@@ -27,7 +31,7 @@ ln -s "$__dir/hev-socks5-tunnel" jni/hev-socks5-tunnel
 #    com.v2ray.ang.service.TProxyService for the VpnService hev tun mode.
 echo 'include $(call all-subdir-makefiles)' > jni/Android.mk
 
-"$NDK_HOME/ndk-build" \
+"$NDK_BUILD" \
     NDK_PROJECT_PATH=. \
     APP_BUILD_SCRIPT=jni/Android.mk \
     "APP_ABI=$ABIS" \
@@ -80,7 +84,7 @@ LOCAL_LDFLAGS += -Wl,-z,common-page-size=16384
 include $(BUILD_EXECUTABLE)
 EXECMK
 
-"$NDK_HOME/ndk-build" \
+"$NDK_BUILD" \
     NDK_PROJECT_PATH=. \
     APP_BUILD_SCRIPT=jni/exec.mk \
     "APP_ABI=$ABIS" \

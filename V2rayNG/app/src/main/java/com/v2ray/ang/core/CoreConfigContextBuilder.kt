@@ -38,7 +38,7 @@ object CoreConfigContextBuilder {
 
         // Step 1: Resolve the main outbound (always tag = TAG_PROXY).
         val primaryResolvedOutbound = resolveOutbound(AppConfig.TAG_PROXY, config) ?: run {
-            LogUtil.e(AppConfig.TAG, "Failed to resolve main outbound for '${config.remarks}'")
+            LogUtil.e(AppConfig.TAG, "Failed to resolve main outbound")
             return null
         }
 
@@ -117,25 +117,41 @@ object CoreConfigContextBuilder {
 
                     try {
                         val profile = SettingsManager.getServerViaRemarks(tag) ?: run {
-                            LogUtil.w(AppConfig.TAG, "Routing tag '$tag' has no matching profile — will fall back to proxy at routing time")
+                            LogUtil.w(
+                                AppConfig.TAG,
+                                "Routing tag has no matching profile; falling back to proxy",
+                            )
                             return@forEach
                         }
                         val resolvedOutbound = resolveOutbound(tag, profile) ?: run {
-                            LogUtil.w(AppConfig.TAG, "Cannot use CUSTOM profile as routing outbound for tag '$tag', skipping")
+                            LogUtil.w(
+                                AppConfig.TAG,
+                                "Cannot use CUSTOM profile as routing outbound; skipping",
+                            )
                             return@forEach
                         }
                         if (resolvedOutbound.resolvedProfiles.isEmpty()) {
-                            LogUtil.w(AppConfig.TAG, "Routing outbound '$tag' resolved to empty list, skipping")
+                            LogUtil.w(AppConfig.TAG, "Routing outbound resolved to empty list; skipping")
                             return@forEach
                         }
                         resolvedOutbounds.add(resolvedOutbound)
-                        LogUtil.d(AppConfig.TAG, "Resolved routing outbound: tag='$tag', type='${resolvedOutbound.resolvedType}', profiles=${resolvedOutbound.resolvedProfiles.size}")
+                        LogUtil.d(
+                            AppConfig.TAG,
+                            "Resolved routing outbound: type='${resolvedOutbound.resolvedType}', " +
+                                "profiles=${resolvedOutbound.resolvedProfiles.size}",
+                        )
                     } catch (e: Exception) {
-                        LogUtil.e(AppConfig.TAG, "Failed to resolve routing outbound for tag '$tag', skipping", e)
+                        LogUtil.e(
+                            AppConfig.TAG,
+                            "Failed to resolve routing outbound: ${e.javaClass.simpleName}",
+                        )
                     }
                 }
         } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "Failed to resolve routing outbounds from rulesets", e)
+            LogUtil.e(
+                AppConfig.TAG,
+                "Failed to resolve routing outbounds from rulesets: ${e.javaClass.simpleName}",
+            )
         }
 
         return resolvedOutbounds
@@ -172,7 +188,10 @@ object CoreConfigContextBuilder {
                 .filter { !it.configType.isComplexType() }
                 .toList()
         } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "Failed to resolve policy group profiles for '${config.remarks}'", e)
+            LogUtil.e(
+                AppConfig.TAG,
+                "Failed to resolve policy group profiles: ${e.javaClass.simpleName}",
+            )
             return listOf(config)
         }
     }
@@ -192,7 +211,10 @@ object CoreConfigContextBuilder {
                 .toList()
                 .reversed()
         } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "Failed to resolve proxy chain profiles for '${config.remarks}'", e)
+            LogUtil.e(
+                AppConfig.TAG,
+                "Failed to resolve proxy chain profiles: ${e.javaClass.simpleName}",
+            )
             return listOf(config)
         }
     }
@@ -215,7 +237,10 @@ object CoreConfigContextBuilder {
             SettingsManager.getServerViaRemarks(subItem.prevProfile)?.let { resolved.add(it) }
             return resolved
         } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "Failed to resolve proxy chain from group for '${config.remarks}'", e)
+            LogUtil.e(
+                AppConfig.TAG,
+                "Failed to resolve proxy chain from group: ${e.javaClass.simpleName}",
+            )
             return listOf(config)
         }
     }

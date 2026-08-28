@@ -61,6 +61,21 @@ object LauncherManager {
         MessageHelper.sendMsg2Service(context, AppConfig.MSG_STATE_RESTART, "")
     }
 
+    /** Applies a persisted selection change to a running daemon without starting a stopped one. */
+    fun reconcileSelectionChange(
+        context: Context,
+        previousGuid: String?,
+        forceReload: Boolean = false,
+    ) {
+        val selectedGuid = MmkvManager.getSelectServer()
+        if (selectedGuid == previousGuid && !forceReload) return
+        if (selectedGuid == null) {
+            stopService(context)
+        } else {
+            restartService(context)
+        }
+    }
+
     /** Restarts the active daemon, or delegates to the caller's permission-aware start flow. */
     fun restartServiceOrStart(context: Context, startIfStopped: () -> Unit) {
         MessageHelper.sendMsg2ServiceForResult(context, AppConfig.MSG_STATE_RESTART, "") { handled ->

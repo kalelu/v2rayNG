@@ -96,12 +96,12 @@ object Utils {
         try {
             return Base64.decode(text, Base64.NO_WRAP).toString(Charsets.UTF_8)
         } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "Failed to decode standard base64", e)
+            LogUtil.e(AppConfig.TAG, "Failed to decode standard base64: ${e.javaClass.simpleName}")
         }
         try {
             return Base64.decode(text, Base64.NO_WRAP.or(Base64.URL_SAFE)).toString(Charsets.UTF_8)
         } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "Failed to decode URL-safe base64", e)
+            LogUtil.e(AppConfig.TAG, "Failed to decode URL-safe base64: ${e.javaClass.simpleName}")
         }
         return null
     }
@@ -164,7 +164,7 @@ object Utils {
 
             return isIpv6Address(addr)
         } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "Failed to validate IP address", e)
+            LogUtil.e(AppConfig.TAG, "Failed to validate IP address: ${e.javaClass.simpleName}")
             return false
         }
     }
@@ -247,7 +247,7 @@ object Utils {
                     Patterns.DOMAIN_NAME.matcher(value).matches() ||
                     URLUtil.isValidUrl(value)
         } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "Failed to validate URL", e)
+            LogUtil.e(AppConfig.TAG, "Failed to validate URL: ${e.javaClass.simpleName}")
             false
         }
     }
@@ -263,7 +263,8 @@ object Utils {
             val uri = uriString.toUri()
             context.startActivity(Intent(Intent.ACTION_VIEW, uri))
         } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "Failed to open URI", e)
+            // Intent exceptions may include the full URI, including subscription tokens.
+            LogUtil.e(AppConfig.TAG, "Failed to open URI: ${e.javaClass.simpleName}")
         }
     }
 
@@ -295,7 +296,10 @@ object Utils {
             // to avoid cross-language interoperability issues.
             URLDecoder.decode(url.replace("+", "%2B"), Charsets.UTF_8.toString())
         } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "Failed to decode encodeURIComponent", e)
+            LogUtil.e(
+                AppConfig.TAG,
+                "Failed to decode encodeURIComponent: ${e.javaClass.simpleName}",
+            )
             url
         }
     }
@@ -311,7 +315,10 @@ object Utils {
             // Replace '+' with '%20' to conform to encodeURIComponent semantics.
             URLEncoder.encode(url, Charsets.UTF_8.toString()).replace("+", "%20")
         } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "Failed to encode encodeURIComponent", e)
+            LogUtil.e(
+                AppConfig.TAG,
+                "Failed to encode encodeURIComponent: ${e.javaClass.simpleName}",
+            )
             url
         }
     }
@@ -437,7 +444,11 @@ object Utils {
                 }
             }
         } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "Failed to validate subscription URL", e)
+            // URI syntax exceptions can echo the complete subscription URL and its token.
+            LogUtil.e(
+                AppConfig.TAG,
+                "Failed to validate subscription URL: ${e.javaClass.simpleName}",
+            )
         }
         return false
     }
@@ -458,7 +469,9 @@ object Utils {
      *
      * @return True if the package is Xray, false otherwise.
      */
-    fun isXray(): Boolean = BuildConfig.APPLICATION_ID.startsWith("com.v2ray.ang")
+    fun isXray(): Boolean =
+        BuildConfig.APPLICATION_ID.startsWith("com.v2ray.ang") ||
+            BuildConfig.APPLICATION_ID.startsWith("com.kalelu.japanproxy")
 
     /**
      * Check if an IPv4 address is within an IPv4 CIDR range

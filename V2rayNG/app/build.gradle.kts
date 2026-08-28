@@ -5,42 +5,62 @@ plugins {
     id("com.jaredsburrows.license")
 }
 
+val releaseSigningEnvironmentVariables = listOf(
+    "JAPAN_PROXY_KEYSTORE_PATH",
+    "JAPAN_PROXY_KEYSTORE_PASSWORD",
+    "JAPAN_PROXY_KEY_ALIAS",
+    "JAPAN_PROXY_KEY_PASSWORD"
+)
+val releaseSigningValues = releaseSigningEnvironmentVariables.associateWith { variable ->
+    providers.environmentVariable(variable).orNull?.takeIf { it.isNotBlank() }
+}
+val missingReleaseSigningVariables = releaseSigningValues
+    .filterValues { it == null }
+    .keys
+val hasReleaseSigningConfiguration = missingReleaseSigningVariables.isEmpty()
+
 android {
     namespace = "com.v2ray.ang"
     compileSdk = 37
+    ndkVersion = "29.0.14206865"
 
     defaultConfig {
-        applicationId = "com.v2ray.ang"
+        applicationId = "com.kalelu.japanproxy"
         minSdk = 24
         targetSdk = 37
-        versionCode = 745
-        versionName = "2.3.5"
+        versionCode = 10000
+        versionName = "1.0.0"
 
-        val abiFilterList = (properties["ABI_FILTERS"] as? String)?.split(';')
         splits {
             abi {
                 isEnable = true
                 reset()
-                if (!abiFilterList.isNullOrEmpty()) {
-                    include(*abiFilterList.toTypedArray())
-                } else {
-                    include(
-                        "arm64-v8a",
-                        "armeabi-v7a",
-                        "x86_64",
-                        "x86"
-                    )
-                }
-                isUniversalApk = abiFilterList.isNullOrEmpty()
+                include("arm64-v8a")
+                isUniversalApk = false
             }
         }
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        if (hasReleaseSigningConfiguration) {
+            create("release") {
+                storeFile = file(releaseSigningValues.getValue("JAPAN_PROXY_KEYSTORE_PATH")!!)
+                storeType = "PKCS12"
+                storePassword = releaseSigningValues.getValue("JAPAN_PROXY_KEYSTORE_PASSWORD")
+                keyAlias = releaseSigningValues.getValue("JAPAN_PROXY_KEY_ALIAS")
+                keyPassword = releaseSigningValues.getValue("JAPAN_PROXY_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            if (hasReleaseSigningConfiguration) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -92,7 +112,7 @@ android {
                 .map { it as com.android.build.gradle.internal.api.ApkVariantOutputImpl }
                 .forEach { output ->
                     val abi = output.getFilter("ABI") ?: "universal"
-                    output.outputFileName = "v2rayNG_${variant.versionName}-fdroid_${abi}.apk"
+                    output.outputFileName = "JapanProxy_${variant.versionName}-fdroid_${abi}.apk"
                     if (versionCodes.containsKey(abi)) {
                         output.versionCodeOverride =
                             (100 * variant.versionCode + versionCodes[abi]!!).plus(5000000)
@@ -112,7 +132,7 @@ android {
                     else
                         "universal"
 
-                    output.outputFileName = "v2rayNG_${variant.versionName}_${abi}.apk"
+                    output.outputFileName = "JapanProxy_${variant.versionName}_${abi}.apk"
                     if (versionCodes.containsKey(abi)) {
                         output.versionCodeOverride =
                             (1000000 * versionCodes[abi]!!).plus(variant.versionCode)
@@ -149,6 +169,26 @@ android {
         }
     }
 
+}
+
+if (!hasReleaseSigningConfiguration) {
+    val appProjectPath = project.path
+    val releaseArtifactTaskPrefixes = listOf("assemble", "bundle", "install", "package")
+
+    gradle.taskGraph.whenReady {
+        val releaseArtifactRequested = allTasks.any { task ->
+            task.path.startsWith("$appProjectPath:") &&
+                task.name.contains("Release") &&
+                releaseArtifactTaskPrefixes.any(task.name::startsWith)
+        }
+
+        if (releaseArtifactRequested) {
+            throw GradleException(
+                "Release signing is not configured. Set all required environment variables: " +
+                    missingReleaseSigningVariables.sorted().joinToString(", ")
+            )
+        }
+    }
 }
 
 dependencies {
@@ -195,7 +235,6 @@ dependencies {
 
     // Background Task Libraries
     implementation(libs.work.runtime.ktx)
-    implementation(libs.work.multiprocess)
 
     // Reorderable list
     implementation(libs.reorderable)

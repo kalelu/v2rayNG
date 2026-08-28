@@ -79,12 +79,16 @@ class CoreVpnService : VpnService(), ServiceControl {
         // Always-on VPN restarts from OS deliver intent.action == SERVICE_INTERFACE or null intent.
         // Reset any stuck start lock left by a killed process to allow setupVpnService() to run.
         val isSystemVpnStart = intent == null || intent.action == SERVICE_INTERFACE
+        if (CoreServiceManager.isRunning()) {
+            LogUtil.i(AppConfig.TAG, "StartCore-VPN: Core is already running")
+            return START_STICKY
+        }
         if (isSystemVpnStart) {
             unlockStart()
         }
         if (!tryLockStart()) {
             LogUtil.w(AppConfig.TAG, "StartCore-VPN: Start already in progress")
-            return START_NOT_STICKY
+            return START_STICKY
         }
         LogUtil.i(AppConfig.TAG, "StartCore-VPN: Service command received, systemVpnStart=$isSystemVpnStart")
         if (!setupVpnService()) {
@@ -339,15 +343,6 @@ class CoreVpnService : VpnService(), ServiceControl {
             //in a row for several times. You will find that later created v2ray core report port in use
             //which means the first v2ray core somehow failed to stop and release the port.
             stopSelf()
-
-            // Add a small delay to allow the async core stop operation to complete
-            // before closing the VPN interface, preventing a race condition that can
-            // leave the VPN icon in the status bar after stopping the service.
-            try {
-                Thread.sleep(100)
-            } catch (e: InterruptedException) {
-                LogUtil.w(AppConfig.TAG, "StartCore-VPN: Sleep interrupted", e)
-            }
 
             try {
                 if (::mInterface.isInitialized) {

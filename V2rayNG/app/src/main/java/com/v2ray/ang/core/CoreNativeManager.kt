@@ -34,7 +34,10 @@ object CoreNativeManager {
                 Libv2ray.initCoreEnv(assetPath, deviceId)
                 LogUtil.i(AppConfig.TAG, "V2Ray core environment initialized successfully")
             } catch (e: Exception) {
-                LogUtil.e(AppConfig.TAG, "Failed to initialize V2Ray core environment", e)
+                LogUtil.e(
+                    AppConfig.TAG,
+                    "Failed to initialize V2Ray core environment: ${e.javaClass.simpleName}",
+                )
                 initialized.set(false)
                 throw e
             }
@@ -48,7 +51,10 @@ object CoreNativeManager {
             Libv2ray.reconcileBrowserDialer(dialerAddr)
             LogUtil.i(AppConfig.TAG, "Browser dialer reconciled successfully with address: $dialerAddr")
         } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "Failed to reconcile browser dialer with address: $dialerAddr", e)
+            LogUtil.e(
+                AppConfig.TAG,
+                "Failed to reconcile browser dialer: ${e.javaClass.simpleName}",
+            )
         }
     }
 
@@ -62,7 +68,7 @@ object CoreNativeManager {
         return try {
             Libv2ray.checkVersionX()
         } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "Failed to check V2Ray version", e)
+            LogUtil.e(AppConfig.TAG, "Failed to check V2Ray version: ${e.javaClass.simpleName}")
             "Unknown"
         }
     }
@@ -78,7 +84,8 @@ object CoreNativeManager {
         return try {
             Libv2ray.measureOutboundDelay(config, testUrl)
         } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "Failed to measure outbound delay", e)
+            // Native errors can contain fragments of the supplied proxy configuration.
+            LogUtil.e(AppConfig.TAG, "Failed to measure outbound delay: ${e.javaClass.simpleName}")
             -1L
         }
     }
@@ -93,7 +100,7 @@ object CoreNativeManager {
         return try {
             Libv2ray.newCoreController(handler)
         } catch (e: Exception) {
-            LogUtil.e(AppConfig.TAG, "Failed to create core controller", e)
+            LogUtil.e(AppConfig.TAG, "Failed to create core controller: ${e.javaClass.simpleName}")
             throw e
         }
     }

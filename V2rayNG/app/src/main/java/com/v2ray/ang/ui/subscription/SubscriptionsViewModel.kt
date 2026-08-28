@@ -96,7 +96,10 @@ class SubscriptionsViewModel(application: Application) : BaseViewModel(applicati
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (e: Exception) {
-                LogUtil.e(AppConfig.TAG, "Subscription update failed", e)
+                LogUtil.e(
+                    AppConfig.TAG,
+                    "Subscription update failed: ${e.javaClass.simpleName}",
+                )
                 toastError(R.string.toast_failure)
             }
         }

@@ -55,7 +55,12 @@ class QSTileService : TileService() {
         }
         mMsgReceive = ReceiveMessageHandler(this)
         val mFilter = IntentFilter(AppConfig.BROADCAST_ACTION_ACTIVITY)
-        ContextCompat.registerReceiver(applicationContext, mMsgReceive, mFilter, Utils.receiverFlags())
+        ContextCompat.registerReceiver(
+            applicationContext,
+            mMsgReceive,
+            mFilter,
+            ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
         MessageHelper.sendMsg2Service(this, AppConfig.MSG_REGISTER_CLIENT, "")
     }
 

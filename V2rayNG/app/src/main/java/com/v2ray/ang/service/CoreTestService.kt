@@ -146,8 +146,9 @@ class CoreTestService : Service() {
             }
 
             is RealPingEvent.Result -> {
-                MmkvManager.encodeServerTestDelayMillis(event.guid, event.delayMillis)
-                MessageHelper.sendMsg2UI(this, AppConfig.MSG_MEASURE_CONFIG_SUCCESS, event.guid)
+                if (MmkvManager.encodeServerTestDelayIfProfileExists(event.guid, event.delayMillis)) {
+                    MessageHelper.sendMsg2UI(this, AppConfig.MSG_MEASURE_CONFIG_SUCCESS, event.guid)
+                }
             }
 
             is RealPingEvent.Finish -> {

@@ -1,19 +1,17 @@
 package com.v2ray.ang.handler
 
-import android.annotation.SuppressLint
 import android.content.Context
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import androidx.work.multiprocess.RemoteWorkManager
 import androidx.work.workDataOf
 import com.v2ray.ang.AngApplication
 import com.v2ray.ang.AppConfig
-import com.v2ray.ang.dto.SubscriptionUpdateMessage
-import com.v2ray.ang.helper.MessageHelper
+import com.v2ray.ang.dto.entities.SubscriptionCache
 import com.v2ray.ang.util.LogUtil
 import java.util.concurrent.TimeUnit
 
@@ -74,7 +72,7 @@ object SubscriptionUpdater {
      * Call from: when a subscription is deleted.
      */
     fun cancelOne(context: Context = AngApplication.application, subId: String) {
-        RemoteWorkManager.getInstance(context)
+        WorkManager.getInstance(context)
             .cancelUniqueWork(taskName(subId))
     }
 
@@ -101,15 +99,15 @@ object SubscriptionUpdater {
         existingWorkPolicy: ExistingPeriodicWorkPolicy
     ) {
         val subItem = MmkvManager.decodeSubscription(subId) ?: return
-        val rw = RemoteWorkManager.getInstance(context)
+        val workManager = WorkManager.getInstance(context)
         if (!subItem.autoUpdate) {
             cancelOne(context, subId)
-            LogUtil.d(AppConfig.TAG, "SubscriptionUpdater: cancelled task for ${subItem.remarks}")
+            LogUtil.d(AppConfig.TAG, "SubscriptionUpdater: cancelled task for $subId")
             return
         }
 
         if (subItem.url.isEmpty()) {
-            LogUtil.i(AppConfig.TAG, "SubscriptionUpdater: url isEmpty for ${subItem.remarks}, skip")
+            LogUtil.i(AppConfig.TAG, "SubscriptionUpdater: URL is empty for $subId, skip")
             return
         }
 
@@ -144,7 +142,7 @@ object SubscriptionUpdater {
             .addTag(AppConfig.SUBSCRIPTION_UPDATE_TASK_NAME)
             .build()
 
-        rw.enqueueUniquePeriodicWork(
+        workManager.enqueueUniquePeriodicWork(
             taskName(subId),
             existingWorkPolicy,
             request
@@ -152,7 +150,7 @@ object SubscriptionUpdater {
 
         LogUtil.i(
             AppConfig.TAG,
-            "SubscriptionUpdater: scheduled [${subItem.remarks}] interval=${intervalMinutes}min " +
+            "SubscriptionUpdater: scheduled [$subId] interval=${intervalMinutes}min " +
                     "initialDelay=${initialDelayMillis / 1000}s policy=$existingWorkPolicy"
         )
     }
@@ -166,24 +164,39 @@ object SubscriptionUpdater {
     class UpdateTask(context: Context, params: WorkerParameters) :
         CoroutineWorker(context, params) {
 
-        @SuppressLint("MissingPermission")
         override suspend fun doWork(): Result {
             val subId = inputData.getString(KEY_SUB_ID)
-            LogUtil.i(AppConfig.TAG, "SubscriptionUpdater update starting via Service: $subId")
+            LogUtil.i(AppConfig.TAG, "SubscriptionUpdater worker starting: $subId")
 
             if (subId.isNullOrEmpty()) {
                 LogUtil.w(AppConfig.TAG, "SubscriptionUpdater: missing subId in worker input")
                 return Result.success()
             }
 
-            updateLastUpdatedAndReschedule(applicationContext, subId)
+            val subscription = MmkvManager.decodeSubscription(subId)
+                ?: return Result.success()
+            // Cancellation of unique work is asynchronous. Re-check the persisted switch so a
+            // worker that was already starting cannot perform one final update after opt-out.
+            if (!subscription.enabled || !subscription.autoUpdate || subscription.url.isBlank()) {
+                return Result.success()
+            }
 
-            MessageHelper.sendMsg2SubscriptionService(
-                applicationContext,
-                SubscriptionUpdateMessage(AppConfig.MSG_SUB_UPDATE_START, true, listOf(subId))
-            )
-
-            return Result.success()
+            return runCatching {
+                val update = AngConfigManager.updateConfigViaSub(
+                    SubscriptionCache(subId, subscription)
+                )
+                if (update.successCount == 0) {
+                    // A successful download may legitimately accept no profiles when the user
+                    // deleted every server from this subscription. Let the normal periodic
+                    // schedule handle the next refresh instead of entering WorkManager backoff.
+                    LogUtil.w(AppConfig.TAG, "SubscriptionUpdater: no profiles accepted for $subId")
+                }
+                Result.success()
+            }.getOrElse {
+                // Periodic work should not create a retry storm on a transient remote failure.
+                LogUtil.w(AppConfig.TAG, "SubscriptionUpdater: scheduled update failed for $subId")
+                Result.success()
+            }
         }
     }
 }

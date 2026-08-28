@@ -81,7 +81,7 @@ class MainRepository(
             app,
             serviceReceiver,
             IntentFilter(AppConfig.BROADCAST_ACTION_ACTIVITY),
-            Utils.receiverFlags()
+            ContextCompat.RECEIVER_NOT_EXPORTED,
         )
         MessageHelper.sendMsg2Service(app, AppConfig.MSG_REGISTER_CLIENT, "")
     }
@@ -158,7 +158,8 @@ class MainRepository(
     override fun encodeServerList(guids: List<String>, groupId: String) =
         MmkvManager.encodeServerList(ArrayList(guids), groupId)
 
-    override fun removeServer(guid: String) = MmkvManager.removeServer(guid)
+    override fun removeServer(guid: String, rememberSubscriptionExclusion: Boolean) =
+        MmkvManager.removeServer(guid, rememberSubscriptionExclusion)
 
     override fun removeAllServer(): Int = MmkvManager.removeAllServer()
 

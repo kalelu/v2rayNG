@@ -16,6 +16,10 @@ import com.v2ray.ang.dto.entities.SubscriptionCache
 import com.v2ray.ang.extension.isComplexType
 import com.v2ray.ang.extension.matchesPattern
 import com.v2ray.ang.extension.moveItem
+import com.v2ray.ang.lite.LiteEnergyRepository
+import com.v2ray.ang.lite.LiteOptimizer
+import com.v2ray.ang.lite.LitePreferences
+import com.v2ray.ang.lite.LiteScheduler
 import com.v2ray.ang.ui.base.BaseViewModel
 import com.v2ray.ang.util.LogUtil
 import kotlinx.coroutines.CancellationException
@@ -52,7 +56,14 @@ class MainViewModel(
             selectedGroupId = dataSource.getSelectedSubscriptionId(),
             selectedGuid = dataSource.getSelectServer(),
             confirmRemove = dataSource.getConfirmRemove(),
-            doubleColumnDisplay = dataSource.getDoubleColumnDisplay()
+            doubleColumnDisplay = dataSource.getDoubleColumnDisplay(),
+            selectedServerName = dataSource.getSelectServer()
+                ?.let(dataSource::decodeServerConfig)?.remarks.orEmpty(),
+            selectedServerDelayMillis = dataSource.getSelectServer()
+                ?.let(dataSource::decodeAffiliationInfo)?.testDelayMillis ?: 0L,
+            candidateGuids = LitePreferences.candidateGuids(),
+            autoOptimizeEnabled = LitePreferences.autoOptimizeEnabled(),
+            energySummary = LiteEnergyRepository.summary(),
         )
     )
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
@@ -73,6 +84,7 @@ class MainViewModel(
     private var preloadJob: Job? = null
     private var selectedGroupLoadJob: Job? = null
     private var reloadJob: Job? = null
+    private var liteDashboardJob: Job? = null
 
     @Volatile
     private var testingGroupId: String? = null
@@ -83,6 +95,7 @@ class MainViewModel(
     init {
         collectServiceEvents()
         setupGroupTab()
+        refreshLiteDashboard()
     }
 
     private fun collectServiceEvents() {
@@ -95,11 +108,15 @@ class MainViewModel(
 
     private fun handleServiceEvent(event: MainServiceEvent) {
         when (event) {
-            MainServiceEvent.StateRunning -> updateRunningState(true, clearTestingText = false)
+            MainServiceEvent.StateRunning -> {
+                updateRunningState(true, clearTestingText = false)
+                refreshSelectedGuid()
+            }
             MainServiceEvent.StateNotRunning -> updateRunningState(false, clearTestingText = false)
             MainServiceEvent.StateStartSuccess -> {
                 toastSuccess(R.string.toast_services_success)
                 updateRunningState(true)
+                refreshSelectedGuid()
             }
 
             MainServiceEvent.StateStartFailure -> {
@@ -113,6 +130,7 @@ class MainViewModel(
             }
 
             MainServiceEvent.MeasureConfigSuccess -> {
+                if (!_uiState.value.isTesting) return
                 viewModelScope.launch(ioDispatcher) {
                     val gid = testingGroupId ?: uiState.value.selectedGroupId
                     cacheMutex.withLock { groupDataCache.remove(gid) }
@@ -121,11 +139,13 @@ class MainViewModel(
             }
 
             is MainServiceEvent.MeasureConfigNotify -> {
-                _uiState.update { it.copy(status = MainStatus.TestProgress(event.progress)) }
+                if (_uiState.value.isTesting) {
+                    _uiState.update { it.copy(status = MainStatus.TestProgress(event.progress)) }
+                }
             }
 
             is MainServiceEvent.MeasureConfigFinish -> {
-                onTestsFinished()
+                if (_uiState.value.isTesting) onTestsFinished()
             }
         }
     }
@@ -186,6 +206,10 @@ class MainViewModel(
             MainAction.SortByTestResults -> sortByTestResultsAsync()
             MainAction.UpdateSubscriptions -> importConfigViaSub()
             MainAction.ExportAll -> exportAllAsync()
+            MainAction.OptimizeCandidates -> optimizeCandidates()
+            MainAction.RefreshLiteDashboard -> refreshLiteDashboard()
+            is MainAction.ToggleCandidate -> toggleCandidate(action.guid)
+            is MainAction.SetAutoOptimize -> setAutoOptimize(action.enabled)
             is MainAction.SelectGroup -> subscriptionIdChanged(action.groupId)
             is MainAction.SelectServer -> updateSelectedGuid(action.guid)
             is MainAction.RemoveServer -> removeServerAndRefresh(action.guid)
@@ -239,6 +263,80 @@ class MainViewModel(
                 confirmRemove = dataSource.getConfirmRemove(),
                 doubleColumnDisplay = dataSource.getDoubleColumnDisplay()
             )
+        }
+        refreshLiteDashboard()
+    }
+
+    private fun refreshLiteDashboard() {
+        liteDashboardJob?.cancel()
+        liteDashboardJob = viewModelScope.launch(ioDispatcher) {
+            val validGuids = dataSource.getServerGuidList("").toSet()
+            ensureActive()
+            val candidates = LitePreferences.retainCandidates(validGuids)
+            val selectedGuid = dataSource.getSelectServer()
+            val selectedProfile = selectedGuid?.let(dataSource::decodeServerConfig)
+            val selectedAffiliation = selectedGuid?.let(dataSource::decodeAffiliationInfo)
+            val energy = LiteEnergyRepository.captureSample(app)
+            ensureActive()
+            _uiState.update {
+                it.copy(
+                    selectedGuid = selectedGuid,
+                    selectedServerName = selectedProfile?.remarks.orEmpty(),
+                    selectedServerDelayMillis = selectedAffiliation?.testDelayMillis ?: 0L,
+                    candidateGuids = candidates,
+                    autoOptimizeEnabled = LitePreferences.autoOptimizeEnabled(),
+                    energySummary = energy,
+                )
+            }
+        }
+    }
+
+    private fun toggleCandidate(guid: String) {
+        if (dataSource.decodeServerConfig(guid) == null) return
+        val candidates = LitePreferences.toggleCandidate(guid)
+        _uiState.update { it.copy(candidateGuids = candidates) }
+    }
+
+    private fun setAutoOptimize(enabled: Boolean) {
+        LitePreferences.setAutoOptimizeEnabled(enabled)
+        LiteScheduler.syncAutoOptimize(app)
+        _uiState.update { it.copy(autoOptimizeEnabled = enabled) }
+    }
+
+    private fun optimizeCandidates() {
+        if (_uiState.value.isOptimizing) return
+        val candidates = LitePreferences.candidateGuids()
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(isOptimizing = true, optimizationMessage = "正在测试候选节点…")
+            }
+            try {
+                val result = withContext(ioDispatcher) {
+                    LiteOptimizer.optimize(
+                        context = app,
+                        requestedGuids = candidates,
+                        onlyTcp = false,
+                    )
+                }
+                _uiState.update {
+                    it.copy(
+                        selectedGuid = result.selectedGuid ?: it.selectedGuid,
+                        optimizationMessage = result.message,
+                    )
+                }
+                toast(result.message)
+                setupGroupTab(forceRefresh = true)
+                refreshLiteDashboard()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                LogUtil.e(AppConfig.TAG, "Candidate optimization failed", error)
+                val message = "节点优选失败，请稍后重试"
+                _uiState.update { it.copy(optimizationMessage = message) }
+                toast(message)
+            } finally {
+                _uiState.update { it.copy(isOptimizing = false) }
+            }
         }
     }
 
@@ -401,7 +499,10 @@ class MainViewModel(
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (e: Exception) {
-                    LogUtil.e(AppConfig.TAG, "Failed to import batch config", e)
+                    LogUtil.e(
+                        AppConfig.TAG,
+                        "Failed to import batch config: ${e.javaClass.simpleName}",
+                    )
                     toastError(R.string.toast_failure)
                 }
             }
@@ -429,14 +530,17 @@ class MainViewModel(
                         else ->
                             toast(dataSource.getString(R.string.title_update_subscription_result, result.configCount, result.successCount, result.failureCount, result.skipCount))
                     }
-                    if (result.configCount > 0) {
+                    if (result.successCount > 0) {
                         setupGroupTab(forceRefresh = true)
                         refreshSelectedGuid()
                     }
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (e: Exception) {
-                    LogUtil.e(AppConfig.TAG, "Subscription update failed", e)
+                    LogUtil.e(
+                        AppConfig.TAG,
+                        "Subscription update failed: ${e.javaClass.simpleName}",
+                    )
                     toastError(R.string.toast_failure)
                 }
             }
@@ -481,10 +585,10 @@ class MainViewModel(
                             guids.forEach { dataSource.removeServer(it) }
                             guids.size
                         }
-                    viewModelScope.launch(ioDispatcher) {
-                        cacheMutex.withLock { groupDataCache.clear() }
-                    }
-                    setupGroupTab(forceRefresh = true)
+                    reconcileRunningServiceAfterDeletion()
+                    cacheMutex.withLock { groupDataCache.clear() }
+                    setupGroupTab(forceRefresh = true).join()
+                    refreshLiteDashboard()
                     toast(dataSource.getString(R.string.title_del_config_count, count))
                 } catch (cancelled: CancellationException) {
                     throw cancelled
@@ -510,7 +614,10 @@ class MainViewModel(
                         }
                     }
                     duplicates.forEach { dataSource.removeServer(it) }
-                    setupGroupTab(forceRefresh = true)
+                    reconcileRunningServiceAfterDeletion()
+                    cacheMutex.withLock { groupDataCache.clear() }
+                    setupGroupTab(forceRefresh = true).join()
+                    refreshLiteDashboard()
                     toast(dataSource.getString(R.string.title_del_duplicate_config_count, duplicates.size))
                 } catch (cancelled: CancellationException) {
                     throw cancelled
@@ -527,10 +634,10 @@ class MainViewModel(
             withContext(ioDispatcher) {
                 try {
                     val count = removeInvalidServerInternal()
-                    viewModelScope.launch(ioDispatcher) {
-                        cacheMutex.withLock { groupDataCache.clear() }
-                        setupGroupTab(forceRefresh = true)
-                    }
+                    reconcileRunningServiceAfterDeletion()
+                    cacheMutex.withLock { groupDataCache.clear() }
+                    setupGroupTab(forceRefresh = true).join()
+                    refreshLiteDashboard()
                     toast(dataSource.getString(R.string.title_del_config_count, count))
                 } catch (cancelled: CancellationException) {
                     throw cancelled
@@ -640,23 +747,52 @@ class MainViewModel(
 
     fun updateSelectedGuid(guid: String) {
         dataSource.setSelectServer(guid)
-        _uiState.update { it.copy(selectedGuid = guid) }
+        val profile = dataSource.decodeServerConfig(guid)
+        val affiliation = dataSource.decodeAffiliationInfo(guid)
+        _uiState.update {
+            it.copy(
+                selectedGuid = guid,
+                selectedServerName = profile?.remarks.orEmpty(),
+                selectedServerDelayMillis = affiliation?.testDelayMillis ?: 0L,
+            )
+        }
     }
 
     fun refreshSelectedGuid() {
-        _uiState.update { it.copy(selectedGuid = dataSource.getSelectServer()) }
+        val guid = dataSource.getSelectServer()
+        val profile = guid?.let(dataSource::decodeServerConfig)
+        val affiliation = guid?.let(dataSource::decodeAffiliationInfo)
+        _uiState.update {
+            it.copy(
+                selectedGuid = guid,
+                selectedServerName = profile?.remarks.orEmpty(),
+                selectedServerDelayMillis = affiliation?.testDelayMillis ?: 0L,
+            )
+        }
     }
 
     fun removeServerAndRefresh(guid: String) {
-        if (guid == uiState.value.selectedGuid) {
-            toast(R.string.toast_action_not_allowed)
-            return
-        }
         viewModelScope.launch(ioDispatcher) {
-            dataSource.removeServer(guid)
-            cacheMutex.withLock { groupDataCache.clear() }
-            setupGroupTab(forceRefresh = true).join()
+            try {
+                dataSource.removeServer(guid, rememberSubscriptionExclusion = true)
+                reconcileRunningServiceAfterDeletion()
+                cacheMutex.withLock { groupDataCache.clear() }
+                setupGroupTab(forceRefresh = true).join()
+                refreshLiteDashboard()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                LogUtil.e(AppConfig.TAG, "Delete profile failed", error)
+                toastError(R.string.toast_failure)
+            }
         }
+    }
+
+    private fun reconcileRunningServiceAfterDeletion() {
+        // The daemon may have switched nodes while deletion was in progress. Always notify the
+        // running daemon so it cannot keep using a profile that has just been removed. A stopped
+        // daemon has no receiver, so this does not start the service.
+        dataSource.sendMsg2Service(serviceMessageAfterDeletion(dataSource.getSelectServer()), "")
     }
 
     fun moveServer(groupId: String, fromPosition: Int, toPosition: Int) {
@@ -778,6 +914,7 @@ class MainViewModel(
         selectedGroupLoadJob?.cancel()
         reloadJob?.cancel()
         filterJob?.cancel()
+        liteDashboardJob?.cancel()
         cancelAllPing()
         dataSource.close()
         super.onCleared()
@@ -794,3 +931,6 @@ class MainViewModel(
         }
     }
 }
+
+internal fun serviceMessageAfterDeletion(selectedGuid: String?): Int =
+    if (selectedGuid == null) AppConfig.MSG_STATE_STOP else AppConfig.MSG_STATE_RESTART
