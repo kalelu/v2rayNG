@@ -87,7 +87,7 @@ fun MainDrawerContent(drawerState: DrawerState, onNavigate: (MainDestination) ->
                     verticalArrangement = Arrangement.Center
                 ) {
                     Image(
-                        painter = painterResource(R.mipmap.ic_japan_proxy),
+                        painter = painterResource(R.drawable.ic_japan_proxy_drawer),
                         contentDescription = null,
                         modifier = Modifier.size(120.dp)
                     )
