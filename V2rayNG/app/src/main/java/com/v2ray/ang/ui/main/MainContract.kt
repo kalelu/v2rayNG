@@ -30,6 +30,7 @@ data class MainUiState(
     val shareQRCodeBitmap: android.graphics.Bitmap? = null,
     val selectedServerName: String = "",
     val selectedServerDelayMillis: Long = 0L,
+    val totalNodeCount: Int = 0,
     val candidateGuids: Set<String> = emptySet(),
     val autoOptimizeEnabled: Boolean = true,
     val isOptimizing: Boolean = false,
@@ -49,6 +50,7 @@ sealed interface MainAction {
     data object TestRealAllServers : MainAction
     data object CancelTesting : MainAction
     data object RemoveAllServers : MainAction
+    data object DeleteAllNodes : MainAction
     data object RemoveDuplicateServers : MainAction
     data object RemoveInvalidServers : MainAction
     data object SortByTestResults : MainAction

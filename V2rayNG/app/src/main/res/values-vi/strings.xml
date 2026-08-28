@@ -9,6 +9,10 @@
     <string name="action_stop_service">Dừng dịch vụ</string>
     <string name="action_ok">OK</string>
     <string name="action_cancel">Hủy</string>
+    <string name="lite_action_delete_all_nodes">Xóa tất cả máy chủ</string>
+    <string name="lite_delete_all_nodes_title">Xóa tất cả máy chủ?</string>
+    <string name="lite_delete_all_nodes_message">Tất cả máy chủ trong mọi nhóm sẽ bị xóa. Mọi kết nối đang hoạt động sẽ dừng. Không thể hoàn tác thao tác này. Các liên kết đăng ký vẫn được giữ lại, vì vậy việc cập nhật đăng ký sau này có thể nhập lại các máy chủ.</string>
+    <string name="lite_delete_all_nodes_success">Đã xóa tất cả máy chủ</string>
     <string name="migration_fail">Không thể chuyển dữ liệu!</string>
     <string name="pull_down_to_refresh">Kéo xuống để làm mới!</string>
 

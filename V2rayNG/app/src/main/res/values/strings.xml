@@ -10,6 +10,10 @@
     <string name="action_stop_service">Stop service</string>
     <string name="action_ok">OK</string>
     <string name="action_cancel">Cancel</string>
+    <string name="lite_action_delete_all_nodes">Delete all nodes</string>
+    <string name="lite_delete_all_nodes_title">Delete all nodes?</string>
+    <string name="lite_delete_all_nodes_message">Every node in every group will be deleted. Any active connection will stop. This action cannot be undone. Subscription links will remain, so updating subscriptions later may import the nodes again.</string>
+    <string name="lite_delete_all_nodes_success">All nodes deleted</string>
     <string name="migration_fail">Data migration failed!</string>
     <string name="pull_down_to_refresh">Please pull down to refresh!</string>
 

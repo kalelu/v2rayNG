@@ -9,6 +9,10 @@
     <string name="action_stop_service">সেবা বন্ধ করুন</string>
     <string name="action_ok">ঠিক আছে</string>
     <string name="action_cancel">বাতিল</string>
+    <string name="lite_action_delete_all_nodes">সব নোড মুছুন</string>
+    <string name="lite_delete_all_nodes_title">সব নোড মুছবেন?</string>
+    <string name="lite_delete_all_nodes_message">সব গ্রুপের সব নোড মুছে ফেলা হবে। কোনো সংযোগ সক্রিয় থাকলে সেটিও বন্ধ হবে। এই কাজটি পূর্বাবস্থায় ফেরানো যাবে না। সাবস্ক্রিপশন লিংকগুলো রাখা হবে, তাই পরে সাবস্ক্রিপশন আপডেট করলে নোডগুলো আবার ইমপোর্ট হতে পারে।</string>
+    <string name="lite_delete_all_nodes_success">সব নোড মুছে ফেলা হয়েছে</string>
     <string name="migration_fail">ডেটা স্থানান্তর ব্যর্থ!</string>
     <string name="pull_down_to_refresh">রিফ্রেশ করতে নিচে টানুন!</string>
 

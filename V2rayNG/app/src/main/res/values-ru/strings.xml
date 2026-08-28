@@ -9,6 +9,10 @@
     <string name="action_stop_service">Остановить службу</string>
     <string name="action_ok">ОК</string>
     <string name="action_cancel">Отмена</string>
+    <string name="lite_action_delete_all_nodes">Удалить все узлы</string>
+    <string name="lite_delete_all_nodes_title">Удалить все узлы?</string>
+    <string name="lite_delete_all_nodes_message">Будут удалены все узлы во всех группах. Активное подключение будет остановлено. Это действие нельзя отменить. Ссылки на подписки сохранятся, поэтому при последующем обновлении подписок узлы могут быть импортированы снова.</string>
+    <string name="lite_delete_all_nodes_success">Все узлы удалены</string>
     <string name="migration_fail">Перенос данных не выполнен!</string>
     <string name="pull_down_to_refresh">Потяните вниз для обновления!</string>
 

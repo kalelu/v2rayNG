@@ -55,6 +55,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -63,6 +65,8 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -126,7 +130,7 @@ private fun litePalette(): LitePalette {
                 accent = Color(0xFF315FEF),
                 accentSoft = Color(0xFFE6ECFF),
                 success = Color(0xFF13A963),
-                danger = Color(0xFFE54850),
+                danger = Color(0xFFD1343C),
             )
         }
     }
@@ -752,7 +756,13 @@ private fun NodesPage(
     val serversFlow = remember(selectedGroupId) { mainViewModel.serversForGroup(selectedGroupId) }
     val servers by serversFlow.collectAsStateWithLifecycle()
     var pendingDeleteGuid by rememberSaveable { mutableStateOf<String?>(null) }
+    var showDeleteAllConfirm by rememberSaveable { mutableStateOf(false) }
+    val deleteAllDismissFocusRequester = remember { FocusRequester() }
     val deleteTarget = servers.firstOrNull { it.guid == pendingDeleteGuid }
+
+    LaunchedEffect(showDeleteAllConfirm) {
+        if (showDeleteAllConfirm) deleteAllDismissFocusRequester.requestFocus()
+    }
 
     LaunchedEffect(uiState.groups, selectedGroupId) {
         if (uiState.groups.isNotEmpty() && uiState.groups.none { it.id == selectedGroupId }) {
@@ -793,8 +803,10 @@ private fun NodesPage(
             NodeActions(
                 palette = palette,
                 isLoading = isLoading,
+                hasNodes = uiState.totalNodeCount > 0,
                 onImportClipboard = { onAction(MainAction.ImportClipboard) },
                 onUpdateSubscriptions = { onAction(MainAction.UpdateSubscriptions) },
+                onDeleteAll = { showDeleteAllConfirm = true },
             )
         }
 
@@ -840,6 +852,7 @@ private fun NodesPage(
                     server = server,
                     selected = server.guid == uiState.selectedGuid,
                     candidate = server.guid in uiState.candidateGuids,
+                    enabled = !isLoading,
                     palette = palette,
                     onSelect = { onAction(MainAction.SelectServer(server.guid)) },
                     onCandidateChange = { onAction(MainAction.ToggleCandidate(server.guid)) },
@@ -878,33 +891,99 @@ private fun NodesPage(
             },
         )
     }
+
+    if (showDeleteAllConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteAllConfirm = false },
+            containerColor = palette.surfaceRaised,
+            titleContentColor = palette.text,
+            textContentColor = palette.textMuted,
+            title = {
+                Text(
+                    text = stringResource(R.string.lite_delete_all_nodes_title),
+                    fontWeight = FontWeight.Bold,
+                )
+            },
+            text = {
+                Text(
+                    text = stringResource(R.string.lite_delete_all_nodes_message),
+                )
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showDeleteAllConfirm = false },
+                    modifier = Modifier.focusRequester(deleteAllDismissFocusRequester),
+                ) {
+                    Text(
+                        text = stringResource(R.string.action_cancel),
+                        color = palette.textMuted,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !isLoading && uiState.totalNodeCount > 0,
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = palette.danger,
+                        disabledContentColor = palette.danger.copy(alpha = 0.38f),
+                    ),
+                    onClick = {
+                        showDeleteAllConfirm = false
+                        onAction(MainAction.DeleteAllNodes)
+                    },
+                ) {
+                    Text(
+                        text = stringResource(R.string.lite_action_delete_all_nodes),
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            },
+        )
+    }
 }
 
 @Composable
 private fun NodeActions(
     palette: LitePalette,
     isLoading: Boolean,
+    hasNodes: Boolean,
     onImportClipboard: () -> Unit,
     onUpdateSubscriptions: () -> Unit,
+    onDeleteAll: () -> Unit,
 ) {
-    Row(
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            CompactActionButton(
+                iconRes = R.drawable.ic_copy,
+                label = "粘贴链接导入",
+                palette = palette,
+                modifier = Modifier.weight(1f),
+                enabled = !isLoading,
+                onClick = onImportClipboard,
+            )
+            CompactActionButton(
+                iconRes = R.drawable.ic_cloud_download_24dp,
+                label = if (isLoading) "正在更新" else "更新订阅",
+                palette = palette,
+                modifier = Modifier.weight(1f),
+                enabled = !isLoading,
+                onClick = onUpdateSubscriptions,
+            )
+        }
         CompactActionButton(
-            iconRes = R.drawable.ic_copy,
-            label = "粘贴链接导入",
+            iconRes = R.drawable.ic_delete_24dp,
+            label = stringResource(R.string.lite_action_delete_all_nodes),
             palette = palette,
-            modifier = Modifier.weight(1f),
-            onClick = onImportClipboard,
-        )
-        CompactActionButton(
-            iconRes = R.drawable.ic_cloud_download_24dp,
-            label = if (isLoading) "正在更新" else "更新订阅",
-            palette = palette,
-            modifier = Modifier.weight(1f),
-            enabled = !isLoading,
-            onClick = onUpdateSubscriptions,
+            modifier = Modifier.fillMaxWidth(),
+            enabled = hasNodes && !isLoading,
+            dangerous = true,
+            onClick = onDeleteAll,
         )
     }
 }
@@ -916,16 +995,19 @@ private fun CompactActionButton(
     palette: LitePalette,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    dangerous: Boolean = false,
     onClick: () -> Unit,
 ) {
     val alpha = if (enabled) 1f else 0.55f
+    val iconColor = if (dangerous) palette.danger else palette.accent
+    val labelColor = if (dangerous) palette.danger else palette.text
     Row(
         modifier = modifier
             .height(52.dp)
             .clip(RoundedCornerShape(17.dp))
             .background(palette.surface)
             .border(1.dp, palette.border, RoundedCornerShape(17.dp))
-            .clickable(enabled = enabled, onClick = onClick)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
@@ -933,13 +1015,13 @@ private fun CompactActionButton(
         Icon(
             painter = painterResource(iconRes),
             contentDescription = null,
-            tint = palette.accent.copy(alpha = alpha),
+            tint = iconColor.copy(alpha = alpha),
             modifier = Modifier.size(20.dp),
         )
         Spacer(Modifier.width(8.dp))
         Text(
             text = label,
-            color = palette.text.copy(alpha = alpha),
+            color = labelColor.copy(alpha = alpha),
             style = MaterialTheme.typography.labelLarge,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
@@ -999,6 +1081,7 @@ private fun NodeCard(
     server: ServersCache,
     selected: Boolean,
     candidate: Boolean,
+    enabled: Boolean,
     palette: LitePalette,
     onSelect: () -> Unit,
     onCandidateChange: () -> Unit,
@@ -1016,7 +1099,7 @@ private fun NodeCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onSelect),
+            .clickable(enabled = enabled, onClick = onSelect),
         colors = CardDefaults.cardColors(containerColor = containerColor),
         shape = RoundedCornerShape(22.dp),
         border = androidx.compose.foundation.BorderStroke(1.dp, borderColor),
@@ -1025,6 +1108,7 @@ private fun NodeCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 RadioButton(
                     selected = selected,
+                    enabled = enabled,
                     onClick = onSelect,
                     colors = RadioButtonDefaults.colors(
                         selectedColor = palette.accent,
@@ -1051,7 +1135,7 @@ private fun NodeCard(
                     )
                 }
                 DelayBadge(delay = server.testDelayMillis, palette = palette)
-                IconButton(onClick = onDelete) {
+                IconButton(enabled = enabled, onClick = onDelete) {
                     Icon(
                         painter = painterResource(R.drawable.ic_delete_24dp),
                         contentDescription = "删除节点",
@@ -1086,6 +1170,7 @@ private fun NodeCard(
                 }
                 Switch(
                     checked = candidate,
+                    enabled = enabled,
                     onCheckedChange = { onCandidateChange() },
                     colors = liteSwitchColors(palette),
                 )

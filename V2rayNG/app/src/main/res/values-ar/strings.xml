@@ -9,6 +9,10 @@
     <string name="action_stop_service">إيقاف الخدمة</string>
     <string name="action_ok">موافق</string>
     <string name="action_cancel">إلغاء</string>
+    <string name="lite_action_delete_all_nodes">حذف جميع العُقد</string>
+    <string name="lite_delete_all_nodes_title">حذف جميع العُقد؟</string>
+    <string name="lite_delete_all_nodes_message">سيتم حذف جميع العُقد من جميع المجموعات. سيتوقف أي اتصال نشط. لا يمكن التراجع عن هذا الإجراء. ستبقى روابط الاشتراك، لذا قد يؤدي تحديث الاشتراكات لاحقًا إلى استيراد العُقد مجددًا.</string>
+    <string name="lite_delete_all_nodes_success">تم حذف جميع العُقد</string>
     <string name="migration_fail">فشلت عملية ترحيل البيانات!</string>
     <string name="pull_down_to_refresh">اسحب لأسفل للتحديث!</string>
 

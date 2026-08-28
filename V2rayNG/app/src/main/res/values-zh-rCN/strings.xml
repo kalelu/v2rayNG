@@ -9,6 +9,10 @@
     <string name="action_stop_service">停止服务</string>
     <string name="action_ok">确定</string>
     <string name="action_cancel">取消</string>
+    <string name="lite_action_delete_all_nodes">删除全部节点</string>
+    <string name="lite_delete_all_nodes_title">删除全部节点？</string>
+    <string name="lite_delete_all_nodes_message">将删除所有分组中的全部节点。当前如已连接，连接也会停止。此操作无法撤销。订阅链接会保留，之后更新订阅时可能重新导入节点。</string>
+    <string name="lite_delete_all_nodes_success">已删除全部节点</string>
     <string name="migration_fail">数据迁移失败啦!</string>
     <string name="pull_down_to_refresh">请下拉刷新!</string>
 

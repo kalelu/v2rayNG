@@ -75,6 +75,7 @@ class MainViewModel(
 
     // ---------- Groups & cache ----------
     private val cacheMutex = Mutex()
+    private val deleteAllNodesMutex = Mutex()
     private val groupDataCache = mutableMapOf<String, List<ServersCache>>()
     private val groupPageFlows = ConcurrentHashMap<String, MutableStateFlow<List<ServersCache>>>()
     private val groupLoadMutexes = ConcurrentHashMap<String, Mutex>()
@@ -201,6 +202,7 @@ class MainViewModel(
             MainAction.TestRealAllServers -> testAllRealPing()
             MainAction.CancelTesting -> cancelAllPing()
             MainAction.RemoveAllServers -> removeAllServerAsync()
+            MainAction.DeleteAllNodes -> deleteAllNodesAsync()
             MainAction.RemoveDuplicateServers -> removeDuplicateServerAsync()
             MainAction.RemoveInvalidServers -> removeInvalidServerAsync()
             MainAction.SortByTestResults -> sortByTestResultsAsync()
@@ -270,7 +272,8 @@ class MainViewModel(
     private fun refreshLiteDashboard() {
         liteDashboardJob?.cancel()
         liteDashboardJob = viewModelScope.launch(ioDispatcher) {
-            val validGuids = dataSource.getServerGuidList("").toSet()
+            val validGuids = dataSource.getServerGuidList("")
+                .filterTo(linkedSetOf()) { dataSource.decodeServerConfig(it) != null }
             ensureActive()
             val candidates = LitePreferences.retainCandidates(validGuids)
             val selectedGuid = dataSource.getSelectServer()
@@ -283,6 +286,7 @@ class MainViewModel(
                     selectedGuid = selectedGuid,
                     selectedServerName = selectedProfile?.remarks.orEmpty(),
                     selectedServerDelayMillis = selectedAffiliation?.testDelayMillis ?: 0L,
+                    totalNodeCount = validGuids.size,
                     candidateGuids = candidates,
                     autoOptimizeEnabled = LitePreferences.autoOptimizeEnabled(),
                     energySummary = energy,
@@ -430,6 +434,9 @@ class MainViewModel(
                 val groups = dataSource.getSubscriptions().map {
                     GroupMapItem(id = it.guid, remarks = it.subscription.remarks)
                 }
+                val totalNodeCount = dataSource.getServerGuidList("")
+                    .distinct()
+                    .count { dataSource.decodeServerConfig(it) != null }
                 val selectedGroup = resolveSelectedGroup(groups)
                 val validIds = groups.mapTo(HashSet()) { it.id }
                 groupPageFlows.keys.removeAll { it !in validIds }
@@ -439,7 +446,8 @@ class MainViewModel(
                     it.copy(
                         groups = groups,
                         selectedGroupId = selectedGroup,
-                        selectedGuid = dataSource.getSelectServer()
+                        selectedGuid = dataSource.getSelectServer(),
+                        totalNodeCount = totalNodeCount,
                     )
                 }
                 groups.forEach { mutableServersForGroup(it.id) }
@@ -758,6 +766,30 @@ class MainViewModel(
         }
     }
 
+    private fun deleteAllNodesAsync() {
+        if (!deleteAllNodesMutex.tryLock()) return
+        launchLoading {
+            try {
+                withContext(ioDispatcher) {
+                    try {
+                        deleteAllNodesAndReconcileService(dataSource)
+                        cacheMutex.withLock { groupDataCache.clear() }
+                        setupGroupTab(forceRefresh = true).join()
+                        refreshLiteDashboard()
+                        toast(dataSource.getString(R.string.lite_delete_all_nodes_success))
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        LogUtil.e(AppConfig.TAG, "Delete all nodes failed", error)
+                        toastError(R.string.toast_failure)
+                    }
+                }
+            } finally {
+                deleteAllNodesMutex.unlock()
+            }
+        }
+    }
+
     fun refreshSelectedGuid() {
         val guid = dataSource.getSelectServer()
         val profile = guid?.let(dataSource::decodeServerConfig)
@@ -934,3 +966,9 @@ class MainViewModel(
 
 internal fun serviceMessageAfterDeletion(selectedGuid: String?): Int =
     if (selectedGuid == null) AppConfig.MSG_STATE_STOP else AppConfig.MSG_STATE_RESTART
+
+internal fun deleteAllNodesAndReconcileService(dataSource: MainDataSource): Int {
+    val count = dataSource.removeAllServer()
+    dataSource.sendMsg2Service(AppConfig.MSG_STATE_STOP, "")
+    return count
+}

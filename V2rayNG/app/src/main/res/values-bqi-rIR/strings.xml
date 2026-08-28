@@ -9,6 +9,10 @@
     <string name="action_stop_service">واڌاشتن سرویس</string>
     <string name="action_ok">قوۊل</string>
     <string name="action_cancel">لغو</string>
+    <string name="lite_action_delete_all_nodes">حذف همه گره‌ها</string>
+    <string name="lite_delete_all_nodes_title">همه گره‌ها حذف شوند؟</string>
+    <string name="lite_delete_all_nodes_message">همه گره‌های همه گروه‌ها حذف می‌شوند. هر اتصال فعالی متوقف خواهد شد. این کار قابل بازگشت نیست. پیوندهای اشتراک باقی می‌مانند، بنابراین ممکن است با به‌روزرسانی اشتراک‌ها در آینده گره‌ها دوباره وارد شوند.</string>
+    <string name="lite_delete_all_nodes_success">همه گره‌ها حذف شدند</string>
     <string name="migration_fail">جاگورویی داڌه یل شکست خرد!</string>
     <string name="pull_down_to_refresh">سی وانۊ کردن، بلگه ن بلم بکشین!</string>
 
