@@ -122,7 +122,10 @@ jobs:
           test "$(apkanalyzer manifest application-id "$apk")" = "com.kalelu.japanproxy"
           signature_report="$("${ANDROID_HOME}/build-tools/37.0.0/apksigner" verify --verbose --print-certs "$apk")"
           printf '%s\n' "$signature_report"
-          cert_digest="$(printf '%s\n' "$signature_report" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')"
+          cert_digest="$(
+            printf '%s\n' "$signature_report" |
+              awk -F ': ' '/certificate SHA-256 digest:/ { print $NF; exit }'
+          )"
           if [[ "${cert_digest,,}" != "${JAPAN_PROXY_CERT_SHA256,,}" ]]; then
             printf 'Unexpected signing certificate: %s\n' "${cert_digest:-missing}" >&2
             exit 1
